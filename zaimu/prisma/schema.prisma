@@ -1,0 +1,786 @@
+// Zaimu — Cross-Border Asset Ownership Operating System
+// Database Schema v1.0
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ORGANISATION & AUTH
+// ─────────────────────────────────────────────
+
+model Organisation {
+  id          String   @id @default(cuid())
+  name        String
+  nameJa      String?  @map("name_ja")
+  type        OrgType  @default(CORPORATE)
+  country     String   @default("JP")
+  timezone    String   @default("Asia/Tokyo")
+  currency    String   @default("JPY")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users       User[]
+  assets      Asset[]
+  portfolios  Portfolio[]
+  documents   Document[]
+  tasks       Task[]
+  reports     Report[]
+  memories    InstitutionalMemory[]
+  fxRates     FxRate[]
+
+  @@map("organisations")
+}
+
+enum OrgType {
+  CORPORATE
+  FAMILY_OFFICE
+  FUND
+  REIT
+  ASSET_MANAGER
+}
+
+model User {
+  id             String    @id @default(cuid())
+  orgId          String    @map("org_id")
+  email          String    @unique
+  name           String
+  nameJa         String?   @map("name_ja")
+  role           UserRole  @default(ANALYST)
+  language       String    @default("ja")
+  avatarUrl      String?   @map("avatar_url")
+  lastActiveAt   DateTime? @map("last_active_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  org            Organisation         @relation(fields: [orgId], references: [id])
+  createdTasks   Task[]               @relation("TaskCreator")
+  assignedTasks  Task[]               @relation("TaskAssignee")
+  memories       InstitutionalMemory[]
+  reportApprovals ReportApproval[]
+  auditLogs      AuditLog[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  PORTFOLIO_MANAGER
+  ANALYST
+  BOARD_MEMBER
+  EXTERNAL_ADVISER
+  READ_ONLY
+}
+
+// ─────────────────────────────────────────────
+// PORTFOLIO & ASSET
+// ─────────────────────────────────────────────
+
+model Portfolio {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  name        String
+  nameJa      String?  @map("name_ja")
+  description String?
+  targetAum   Decimal? @map("target_aum") @db.Decimal(18, 2)
+  currency    String   @default("USD")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org         Organisation @relation(fields: [orgId], references: [id])
+  assets      Asset[]
+
+  @@map("portfolios")
+}
+
+model Asset {
+  id                String         @id @default(cuid())
+  orgId             String         @map("org_id")
+  portfolioId       String?        @map("portfolio_id")
+  name              String
+  nameJa            String?        @map("name_ja")
+  assetType         AssetType
+  status            AssetStatus    @default(ACTIVE)
+  country           String
+  city              String
+  address           String?
+  totalArea         Decimal?       @map("total_area") @db.Decimal(12, 2)
+  areaUnit          String?        @map("area_unit") @default("sqm")
+  acquisitionDate   DateTime?      @map("acquisition_date")
+  acquisitionCost   Decimal?       @map("acquisition_cost") @db.Decimal(18, 2)
+  acquisitionFx     Decimal?       @map("acquisition_fx") @db.Decimal(12, 6)
+  currency          String         @default("USD")
+  currentValuation  Decimal?       @map("current_valuation") @db.Decimal(18, 2)
+  lastValuationDate DateTime?      @map("last_valuation_date")
+  occupancyRate     Decimal?       @map("occupancy_rate") @db.Decimal(5, 2)
+  operationalScore  Int?           @map("operational_score")
+  reportingScore    Int?           @map("reporting_score")
+  covenantStatus    CovenantStatus @default(COMPLIANT) @map("covenant_status")
+  refinancingDate   DateTime?      @map("refinancing_date")
+  notes             String?
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  org               Organisation       @relation(fields: [orgId], references: [id])
+  portfolio         Portfolio?         @relation(fields: [portfolioId], references: [id])
+  ownershipEntities OwnershipEntity[]
+  loans             Loan[]
+  leases            Lease[]
+  capexItems        CapexItem[]
+  valuations        Valuation[]
+  documents         Document[]
+  tasks             Task[]
+  alerts            Alert[]
+  pmReports         PmReport[]
+  memories          InstitutionalMemory[]
+  reportAssets      ReportAsset[]
+  cashFlows         CashFlow[]
+
+  @@map("assets")
+}
+
+enum AssetType {
+  OFFICE
+  RESIDENTIAL
+  RETAIL
+  LOGISTICS
+  HOTEL
+  MIXED_USE
+  INDUSTRIAL
+  INFRASTRUCTURE
+  LAND
+  OTHER
+}
+
+enum AssetStatus {
+  ACTIVE
+  UNDER_DD
+  UNDER_CONSTRUCTION
+  REFINANCING
+  DISPOSAL
+  DISPOSED
+}
+
+enum CovenantStatus {
+  COMPLIANT
+  WATCH
+  BREACH
+  WAIVED
+  UNKNOWN
+}
+
+// ─────────────────────────────────────────────
+// OWNERSHIP STRUCTURE
+// ─────────────────────────────────────────────
+
+model OwnershipEntity {
+  id             String    @id @default(cuid())
+  assetId        String    @map("asset_id")
+  entityName     String    @map("entity_name")
+  entityNameJa   String?   @map("entity_name_ja")
+  entityType     String
+  jurisdiction   String
+  ownershipPct   Decimal   @map("ownership_pct") @db.Decimal(5, 2)
+  parentEntity   String?   @map("parent_entity")
+  taxId          String?   @map("tax_id")
+  incorporatedAt DateTime? @map("incorporated_at")
+  notes          String?
+
+  asset          Asset     @relation(fields: [assetId], references: [id])
+
+  @@map("ownership_entities")
+}
+
+// ─────────────────────────────────────────────
+// DEBT STACK
+// ─────────────────────────────────────────────
+
+model Loan {
+  id              String       @id @default(cuid())
+  assetId         String       @map("asset_id")
+  lenderName      String       @map("lender_name")
+  loanType        LoanType     @map("loan_type")
+  currency        String       @default("USD")
+  originalBalance Decimal      @map("original_balance") @db.Decimal(18, 2)
+  currentBalance  Decimal      @map("current_balance") @db.Decimal(18, 2)
+  interestRate    Decimal      @map("interest_rate") @db.Decimal(6, 4)
+  rateType        RateType     @map("rate_type")
+  margin          Decimal?     @db.Decimal(6, 4)
+  benchmark       String?
+  originationDate DateTime     @map("origination_date")
+  maturityDate    DateTime     @map("maturity_date")
+  ltv             Decimal?     @db.Decimal(5, 2)
+  dscr            Decimal?     @db.Decimal(6, 4)
+  status          LoanStatus   @default(CURRENT)
+  covenants       LoanCovenant[]
+  amortisations   AmortisationSchedule[]
+
+  asset           Asset        @relation(fields: [assetId], references: [id])
+
+  @@map("loans")
+}
+
+enum LoanType {
+  SENIOR
+  MEZZANINE
+  PREFERRED_EQUITY
+  BRIDGE
+  CONSTRUCTION
+  TERM
+  REVOLVING
+}
+
+enum RateType {
+  FIXED
+  FLOATING
+  HYBRID
+}
+
+enum LoanStatus {
+  CURRENT
+  WATCH
+  DEFAULT
+  REFINANCING
+  REPAID
+}
+
+model LoanCovenant {
+  id           String         @id @default(cuid())
+  loanId       String         @map("loan_id")
+  covenantType String         @map("covenant_type")
+  description  String
+  threshold    String
+  currentValue String?        @map("current_value")
+  status       CovenantStatus @default(UNKNOWN)
+  testFreq     String         @map("test_freq")
+  nextTestDate DateTime?      @map("next_test_date")
+  notes        String?
+
+  loan         Loan           @relation(fields: [loanId], references: [id])
+
+  @@map("loan_covenants")
+}
+
+model AmortisationSchedule {
+  id        String    @id @default(cuid())
+  loanId    String    @map("loan_id")
+  dueDate   DateTime  @map("due_date")
+  principal Decimal   @db.Decimal(18, 2)
+  interest  Decimal   @db.Decimal(18, 2)
+  balance   Decimal   @db.Decimal(18, 2)
+  paid      Boolean   @default(false)
+  paidAt    DateTime? @map("paid_at")
+
+  loan      Loan      @relation(fields: [loanId], references: [id])
+
+  @@map("amortisation_schedules")
+}
+
+// ─────────────────────────────────────────────
+// LEASES
+// ─────────────────────────────────────────────
+
+model Lease {
+  id              String      @id @default(cuid())
+  assetId         String      @map("asset_id")
+  tenantName      String      @map("tenant_name")
+  tenantNameJa    String?     @map("tenant_name_ja")
+  floor           String?
+  suite           String?
+  area            Decimal?    @db.Decimal(10, 2)
+  areaUnit        String?     @map("area_unit") @default("sqm")
+  currency        String      @default("USD")
+  baseRent        Decimal     @map("base_rent") @db.Decimal(18, 2)
+  rentFrequency   String      @map("rent_frequency") @default("MONTHLY")
+  leaseStart      DateTime    @map("lease_start")
+  leaseEnd        DateTime    @map("lease_end")
+  breakDate       DateTime?   @map("break_date")
+  renewalWindow   DateTime?   @map("renewal_window")
+  renewalOptions  String?     @map("renewal_options")
+  status          LeaseStatus @default(ACTIVE)
+  securityDeposit Decimal?    @map("security_deposit") @db.Decimal(18, 2)
+  notes           String?
+  documentId      String?     @map("document_id")
+
+  asset           Asset       @relation(fields: [assetId], references: [id])
+
+  @@map("leases")
+}
+
+enum LeaseStatus {
+  ACTIVE
+  EXPIRED
+  PENDING
+  NOTICE_GIVEN
+  RENEWED
+  SURRENDERED
+}
+
+// ─────────────────────────────────────────────
+// CAPEX
+// ─────────────────────────────────────────────
+
+model CapexItem {
+  id            String      @id @default(cuid())
+  assetId       String      @map("asset_id")
+  category      String
+  description   String
+  descriptionJa String?     @map("description_ja")
+  budget        Decimal     @db.Decimal(18, 2)
+  spent         Decimal     @default(0) @db.Decimal(18, 2)
+  currency      String      @default("USD")
+  status        CapexStatus @default(PLANNED)
+  contractor    String?
+  startDate     DateTime?   @map("start_date")
+  endDate       DateTime?   @map("end_date")
+  notes         String?
+
+  asset         Asset       @relation(fields: [assetId], references: [id])
+
+  @@map("capex_items")
+}
+
+enum CapexStatus {
+  PLANNED
+  APPROVED
+  IN_PROGRESS
+  COMPLETE
+  CANCELLED
+  ON_HOLD
+}
+
+// ─────────────────────────────────────────────
+// VALUATIONS
+// ─────────────────────────────────────────────
+
+model Valuation {
+  id            String    @id @default(cuid())
+  assetId       String    @map("asset_id")
+  valuationDate DateTime  @map("valuation_date")
+  value         Decimal   @db.Decimal(18, 2)
+  currency      String    @default("USD")
+  method        String
+  valuer        String
+  capRate       Decimal?  @map("cap_rate") @db.Decimal(6, 4)
+  noi           Decimal?  @db.Decimal(18, 2)
+  documentId    String?   @map("document_id")
+  notes         String?
+
+  asset         Asset     @relation(fields: [assetId], references: [id])
+
+  @@map("valuations")
+}
+
+// ─────────────────────────────────────────────
+// PM REPORTS
+// ─────────────────────────────────────────────
+
+model PmReport {
+  id           String         @id @default(cuid())
+  assetId      String         @map("asset_id")
+  reportPeriod DateTime       @map("report_period")
+  submittedAt  DateTime?      @map("submitted_at")
+  goi          Decimal?       @db.Decimal(18, 2)
+  noi          Decimal?       @db.Decimal(18, 2)
+  opex         Decimal?       @db.Decimal(18, 2)
+  occupancy    Decimal?       @db.Decimal(5, 2)
+  currency     String         @default("USD")
+  pmCommentary String?        @map("pm_commentary")
+  aiSummary    String?        @map("ai_summary")
+  aiRiskFlags  Json?          @map("ai_risk_flags")
+  documentId   String?        @map("document_id")
+  status       PmReportStatus @default(PENDING)
+
+  asset        Asset          @relation(fields: [assetId], references: [id])
+
+  @@map("pm_reports")
+}
+
+enum PmReportStatus {
+  PENDING
+  RECEIVED
+  REVIEWED
+  FLAGGED
+}
+
+// ─────────────────────────────────────────────
+// CASH FLOWS
+// ─────────────────────────────────────────────
+
+model CashFlow {
+  id          String        @id @default(cuid())
+  assetId     String        @map("asset_id")
+  date        DateTime
+  category    String
+  description String
+  amount      Decimal       @db.Decimal(18, 2)
+  currency    String        @default("USD")
+  flowType    CashFlowType  @map("flow_type")
+  actual      Boolean       @default(false)
+  notes       String?
+
+  asset       Asset         @relation(fields: [assetId], references: [id])
+
+  @@map("cash_flows")
+}
+
+enum CashFlowType {
+  INFLOW
+  OUTFLOW
+}
+
+// ─────────────────────────────────────────────
+// TREASURY & FX
+// ─────────────────────────────────────────────
+
+model FxRate {
+  id            String       @id @default(cuid())
+  orgId         String       @map("org_id")
+  baseCurrency  String       @map("base_currency")
+  quoteCurrency String       @map("quote_currency")
+  rate          Decimal      @db.Decimal(16, 8)
+  source        String       @default("MANUAL")
+  rateDate      DateTime     @map("rate_date")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  org           Organisation @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, baseCurrency, quoteCurrency, rateDate])
+  @@map("fx_rates")
+}
+
+// ─────────────────────────────────────────────
+// DOCUMENTS
+// ─────────────────────────────────────────────
+
+model Document {
+  id            String         @id @default(cuid())
+  orgId         String         @map("org_id")
+  assetId       String?        @map("asset_id")
+  name          String
+  nameJa        String?        @map("name_ja")
+  docType       DocumentType   @map("doc_type")
+  status        DocStatus      @default(PENDING)
+  fileUrl       String?        @map("file_url")
+  fileSize      Int?           @map("file_size")
+  mimeType      String?        @map("mime_type")
+  uploadedAt    DateTime       @default(now()) @map("uploaded_at")
+  processedAt   DateTime?      @map("processed_at")
+  extractedData Json?          @map("extracted_data")
+  aiSummary     String?        @map("ai_summary")
+  aiSummaryJa   String?        @map("ai_summary_ja")
+  aiFlags       Json?          @map("ai_flags")
+  tags          String[]
+  expiresAt     DateTime?      @map("expires_at")
+  effectiveDate DateTime?      @map("effective_date")
+  parties       String[]
+  notes         String?
+
+  org           Organisation   @relation(fields: [orgId], references: [id])
+  asset         Asset?         @relation(fields: [assetId], references: [id])
+  obligations   DocumentObligation[]
+
+  @@map("documents")
+}
+
+enum DocumentType {
+  LOAN_AGREEMENT
+  LEASE_AGREEMENT
+  VALUATION_REPORT
+  PM_REPORT
+  INSURANCE_POLICY
+  TAX_DOCUMENT
+  CORPORATE_DOCUMENT
+  BOARD_RESOLUTION
+  CAPEX_QUOTE
+  INVOICE
+  FINANCIAL_STATEMENT
+  LENDER_STATEMENT
+  RENT_ROLL
+  LEGAL_OPINION
+  ENVIRONMENTAL_REPORT
+  OTHER
+}
+
+enum DocStatus {
+  PENDING
+  PROCESSING
+  EXTRACTED
+  REVIEWED
+  ARCHIVED
+  ERROR
+}
+
+model DocumentObligation {
+  id            String           @id @default(cuid())
+  documentId    String           @map("document_id")
+  description   String
+  descriptionJa String?          @map("description_ja")
+  dueDate       DateTime?        @map("due_date")
+  category      String
+  priority      Priority         @default(MEDIUM)
+  status        ObligationStatus @default(OPEN)
+  notes         String?
+
+  document      Document         @relation(fields: [documentId], references: [id])
+
+  @@map("document_obligations")
+}
+
+enum Priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ObligationStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETE
+  OVERDUE
+  WAIVED
+}
+
+// ─────────────────────────────────────────────
+// BOARD REPORTING
+// ─────────────────────────────────────────────
+
+model Report {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  title       String
+  titleJa     String?      @map("title_ja")
+  reportType  ReportType   @map("report_type")
+  period      DateTime
+  status      ReportStatus @default(DRAFT)
+  language    String       @default("ja")
+  content     Json?
+  generatedAt DateTime?    @map("generated_at")
+  finalizedAt DateTime?    @map("finalized_at")
+  pdfUrl      String?      @map("pdf_url")
+  notes       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  org         Organisation   @relation(fields: [orgId], references: [id])
+  assets      ReportAsset[]
+  approvals   ReportApproval[]
+
+  @@map("reports")
+}
+
+enum ReportType {
+  MONTHLY_BOARD
+  QUARTERLY_REVIEW
+  ANNUAL_SUMMARY
+  REFINANCING_MEMO
+  RISK_SUMMARY
+  INVESTMENT_UPDATE
+  CASH_FLOW_FORECAST
+  COVENANT_REPORT
+  FX_EXPOSURE
+  CUSTOM
+}
+
+enum ReportStatus {
+  DRAFT
+  GENERATING
+  REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+model ReportAsset {
+  id           String  @id @default(cuid())
+  reportId     String  @map("report_id")
+  assetId      String  @map("asset_id")
+  commentary   String?
+  commentaryJa String? @map("commentary_ja")
+
+  report       Report  @relation(fields: [reportId], references: [id])
+  asset        Asset   @relation(fields: [assetId], references: [id])
+
+  @@map("report_assets")
+}
+
+model ReportApproval {
+  id         String    @id @default(cuid())
+  reportId   String    @map("report_id")
+  userId     String    @map("user_id")
+  status     String
+  approvedAt DateTime? @map("approved_at")
+  comments   String?
+
+  report     Report    @relation(fields: [reportId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@map("report_approvals")
+}
+
+// ─────────────────────────────────────────────
+// TASKS & ALERTS
+// ─────────────────────────────────────────────
+
+model Task {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  assetId     String?      @map("asset_id")
+  title       String
+  titleJa     String?      @map("title_ja")
+  description String?
+  category    TaskCategory
+  priority    Priority     @default(MEDIUM)
+  status      TaskStatus   @default(OPEN)
+  creatorId   String       @map("creator_id")
+  assigneeId  String?      @map("assignee_id")
+  dueDate     DateTime?    @map("due_date")
+  completedAt DateTime?    @map("completed_at")
+  tags        String[]
+  notes       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  org         Organisation @relation(fields: [orgId], references: [id])
+  asset       Asset?       @relation(fields: [assetId], references: [id])
+  creator     User         @relation("TaskCreator", fields: [creatorId], references: [id])
+  assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  @@map("tasks")
+}
+
+enum TaskCategory {
+  REPORTING
+  COMPLIANCE
+  COVENANT
+  REFINANCING
+  LEASE_MANAGEMENT
+  CAPEX
+  LEGAL
+  LENDER_COMMUNICATION
+  PM_REVIEW
+  FX_MANAGEMENT
+  BOARD_PREPARATION
+  DOCUMENT_COLLECTION
+  OTHER
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  COMPLETE
+  CANCELLED
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  assetId     String?       @map("asset_id")
+  alertType   AlertType     @map("alert_type")
+  severity    AlertSeverity
+  title       String
+  titleJa     String?       @map("title_ja")
+  message     String
+  messageJa   String?       @map("message_ja")
+  triggeredAt DateTime      @default(now()) @map("triggered_at")
+  resolvedAt  DateTime?     @map("resolved_at")
+  resolved    Boolean       @default(false)
+  metadata    Json?
+
+  asset       Asset?        @relation(fields: [assetId], references: [id])
+
+  @@map("alerts")
+}
+
+enum AlertType {
+  COVENANT_BREACH
+  COVENANT_WATCH
+  LOAN_MATURITY
+  LEASE_EXPIRY
+  LEASE_BREAK
+  RENEWAL_WINDOW
+  REPORT_OVERDUE
+  CAPEX_OVERRUN
+  FX_THRESHOLD
+  OCCUPANCY_DROP
+  DOCUMENT_EXPIRY
+  OBLIGATION_DUE
+}
+
+enum AlertSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+// ─────────────────────────────────────────────
+// INSTITUTIONAL MEMORY
+// ─────────────────────────────────────────────
+
+model InstitutionalMemory {
+  id         String     @id @default(cuid())
+  orgId      String     @map("org_id")
+  assetId    String?    @map("asset_id")
+  userId     String     @map("user_id")
+  memoryType MemoryType @map("memory_type")
+  title      String
+  titleJa    String?    @map("title_ja")
+  content    String
+  contentJa  String?    @map("content_ja")
+  tags       String[]
+  importance Priority   @default(MEDIUM)
+  period     DateTime?
+  embedding  Json?
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  org        Organisation @relation(fields: [orgId], references: [id])
+  asset      Asset?       @relation(fields: [assetId], references: [id])
+  user       User         @relation(fields: [userId], references: [id])
+
+  @@map("institutional_memories")
+}
+
+enum MemoryType {
+  BOARD_DECISION
+  INVESTMENT_RATIONALE
+  COVENANT_DISCUSSION
+  REFINANCING_DECISION
+  OPERATIONAL_INCIDENT
+  LENDER_DISCUSSION
+  ASSUMPTION_CHANGE
+  RISK_ASSESSMENT
+  TENANT_DISCUSSION
+  LEGAL_ADVICE
+  TAX_POSITION
+  OTHER
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  action    String
+  entity    String
+  entityId  String   @map("entity_id")
+  before    Json?
+  after     Json?
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
