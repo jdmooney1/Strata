@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -256,6 +257,8 @@ Language: ${language === "ja" ? "Write all content in formal Japanese (書き言
     await db.reportAsset.create({
       data: { reportId: report.id, assetId },
     });
+
+    await createAuditLog({ action: "REPORT_GENERATE", entity: "Report", entityId: report.id, after: { title: report.title, assetId, orgId } });
 
     return Response.json({ report, content: reportContent }, { status: 201 });
   } catch (err) {

@@ -1,69 +1,72 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import {
-  FileBarChart,
-  Plus,
-  Sparkles,
-  Clock,
-  CheckCircle,
-  FileText,
-} from "lucide-react";
-import { MOCK_REPORTS, MOCK_ASSETS } from "@/lib/mock-data";
-import { formatDate } from "@/lib/utils";
+import { Suspense } from "react";
+import { FileBarChart, CheckCircle, Sparkles, AlertTriangle } from "lucide-react";
+import { db } from "@/lib/db";
+import { formatDate, formatRelative } from "@/lib/utils";
+import { ReportGenerator } from "./report-generator";
 
 export const metadata: Metadata = { title: "Board Reports" };
+export const dynamic = "force-dynamic";
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
-  MONTHLY_BOARD:     "Monthly Board Report",
-  QUARTERLY_REVIEW:  "Quarterly Review",
-  ANNUAL_SUMMARY:    "Annual Summary",
-  REFINANCING_MEMO:  "Refinancing Memo",
-  RISK_SUMMARY:      "Risk Summary",
+  MONTHLY_BOARD: "Monthly Board Report",
+  QUARTERLY_REVIEW: "Quarterly Review",
+  ANNUAL_SUMMARY: "Annual Summary",
+  REFINANCING_MEMO: "Refinancing Memo",
+  RISK_SUMMARY: "Risk Summary",
   INVESTMENT_UPDATE: "Investment Update",
   CASH_FLOW_FORECAST: "Cash Flow Forecast",
-  COVENANT_REPORT:   "Covenant Report",
-  FX_EXPOSURE:       "FX Exposure Report",
-  CUSTOM:            "Custom Report",
+  COVENANT_REPORT: "Covenant Report",
+  FX_EXPOSURE: "FX Exposure Report",
+  CUSTOM: "Custom Report",
 };
 
-const STATUS_CONFIG: Record<string, { cls: string; label: string; icon: React.ReactNode }> = {
-  DRAFT:      { cls: "badge-gray",   label: "Draft",      icon: null },
-  GENERATING: { cls: "badge-blue",   label: "Generating", icon: null },
-  REVIEW:     { cls: "badge-amber",  label: "In Review",  icon: null },
-  APPROVED:   { cls: "badge-navy",   label: "Approved",   icon: null },
-  PUBLISHED:  { cls: "badge-green",  label: "Published",  icon: null },
-  ARCHIVED:   { cls: "badge-gray",   label: "Archived",   icon: null },
+const STATUS_CONFIG: Record<string, { cls: string; label: string }> = {
+  DRAFT:      { cls: "badge-gray",  label: "Draft" },
+  GENERATING: { cls: "badge-blue",  label: "Generating" },
+  REVIEW:     { cls: "badge-amber", label: "In Review" },
+  APPROVED:   { cls: "badge-navy",  label: "Approved" },
+  PUBLISHED:  { cls: "badge-green", label: "Published" },
+  ARCHIVED:   { cls: "badge-gray",  label: "Archived" },
 };
 
-export default function ReportsPage() {
-  const published = MOCK_REPORTS.filter((r) => r.status === "PUBLISHED");
-  const inReview  = MOCK_REPORTS.filter((r) => r.status === "REVIEW");
-  const drafts    = MOCK_REPORTS.filter((r) => r.status === "DRAFT" || r.status === "GENERATING");
+const OVERALL_STATUS_CONFIG: Record<string, { dot: string; label: string }> = {
+  GREEN: { dot: "bg-[var(--color-status-green)]", label: "Green" },
+  AMBER: { dot: "bg-[var(--color-status-amber)]", label: "Amber" },
+  RED:   { dot: "bg-[var(--color-status-red)]",   label: "Red" },
+};
+
+async function ReportsContent() {
+  const reports = await db.report.findMany({
+    where: { orgId: "org_sanyo_001" },
+    orderBy: { createdAt: "desc" },
+    include: {
+      assets: { include: { asset: { select: { name: true, country: true } } } },
+    },
+  });
+
+  const published = reports.filter(r => r.status === "PUBLISHED").length;
+  const inReview  = reports.filter(r => r.status === "REVIEW").length;
+  const total     = reports.length;
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-lg font-semibold">Board Reporting Engine</h1>
           <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            取締役会報告エンジン — AI-generated institutional reports in Japanese
+            取締役会報告エンジン — AI-generated institutional reports
           </p>
         </div>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition-colors" style={{ background: "var(--color-navy-700)" }}>
-          <Plus className="size-3.5" />
-          Generate Report
-        </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "Total Reports",   labelJa: "総報告書数",   value: MOCK_REPORTS.length, color: "" },
-          { label: "In Review",       labelJa: "レビュー中",   value: inReview.length,     color: inReview.length > 0 ? "text-[var(--color-status-amber)]" : "" },
-          { label: "Drafts",          labelJa: "下書き",       value: drafts.length,       color: "" },
-          { label: "Published",       labelJa: "発行済み",     value: published.length,    color: "text-[var(--color-status-green)]" },
-        ].map((s) => (
+          { label: "Total Reports", labelJa: "総レポート数",    value: total,     color: "" },
+          { label: "Published",     labelJa: "公開済み",        value: published,  color: published > 0 ? "text-[var(--color-status-green)]" : "" },
+          { label: "In Review",     labelJa: "レビュー中",      value: inReview,   color: inReview > 0 ? "text-[var(--color-status-amber)]" : "" },
+          { label: "AI Generated",  labelJa: "AI生成済み",      value: reports.filter(r => r.generatedAt).length, color: "" },
+        ].map(s => (
           <div key={s.label} className="data-card p-4">
             <p className="section-label">{s.label}</p>
             <p className="text-xs text-[var(--color-text-muted)]">{s.labelJa}</p>
@@ -72,201 +75,118 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* AI Reporting info */}
-      <div className="ai-insight">
-        <p className="ai-insight-label">AI Board Reporting — How It Works</p>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 mt-2">
-          {[
-            {
-              step: "01",
-              title: "Data Aggregation",
-              desc: "System automatically pulls PM reports, loan statements, covenant tests, FX rates, and valuation data for the reporting period.",
-            },
-            {
-              step: "02",
-              title: "AI Draft Generation",
-              desc: "Claude generates institutional Japanese commentary for each asset and portfolio-level executive summary, risk flags, and recommended actions.",
-            },
-            {
-              step: "03",
-              title: "Review & Approve",
-              desc: "Portfolio manager reviews AI draft, edits commentary, and submits for board approval. Final report published as PDF in Japanese.",
-            },
-          ].map((item) => (
-            <div key={item.step} className="flex gap-3">
-              <span className="text-lg font-bold text-[var(--color-navy-300)] font-numeric leading-tight flex-shrink-0">
-                {item.step}
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-[var(--color-navy-700)]">{item.title}</p>
-                <p className="text-xs text-[var(--color-navy-900)] mt-0.5 leading-relaxed">{item.desc}</p>
-              </div>
-            </div>
-          ))}
+      <div className="ai-insight flex items-start gap-3">
+        <Sparkles className="size-4 mt-0.5 text-[var(--color-navy-500)] flex-shrink-0" />
+        <div>
+          <p className="ai-insight-label">Board Reporting Engine</p>
+          <p className="text-sm text-[var(--color-navy-900)] leading-relaxed">
+            Select an asset, report type, and period. Claude reads the asset&apos;s live data — debt, covenants, leases, documents, FX rates — and generates a formal institutional report in Japanese or English. All assertions are sourced; gaps are flagged explicitly.
+          </p>
         </div>
       </div>
 
-      {/* Report Generate Form (static) */}
-      <div className="data-card">
-        <div className="data-card-header">
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-4 text-[var(--color-navy-500)]" />
-            <h2 className="text-sm font-semibold">Generate New Report</h2>
-          </div>
-        </div>
-        <div className="data-card-body">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div>
-              <label className="section-label block mb-1.5">Report Type</label>
-              <select className="w-full text-sm border border-[var(--color-border)] rounded-md px-3 py-2 bg-white text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-navy-400)]">
-                {Object.entries(REPORT_TYPE_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="section-label block mb-1.5">Period</label>
-              <input
-                type="month"
-                defaultValue="2026-05"
-                className="w-full text-sm border border-[var(--color-border)] rounded-md px-3 py-2 bg-white focus:outline-none focus:border-[var(--color-navy-400)]"
-              />
-            </div>
-            <div>
-              <label className="section-label block mb-1.5">Output Language</label>
-              <select className="w-full text-sm border border-[var(--color-border)] rounded-md px-3 py-2 bg-white focus:outline-none focus:border-[var(--color-navy-400)]">
-                <option value="ja">日本語 (Japanese)</option>
-                <option value="en">English</option>
-                <option value="both">Bilingual (JA / EN)</option>
-              </select>
-            </div>
-          </div>
-          <div className="mt-4 flex items-center gap-2">
-            <button className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md text-white transition-colors" style={{ background: "var(--color-navy-700)" }}>
-              <Sparkles className="size-3.5" />
-              Generate with AI
-            </button>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Estimated generation time: 45–90 seconds
-            </p>
-          </div>
-        </div>
-      </div>
+      <ReportGenerator orgId="org_sanyo_001" />
 
-      {/* Report History */}
       <div className="data-card">
         <div className="data-card-header">
-          <h2 className="text-sm font-semibold">Report History</h2>
-          <span className="badge badge-gray">{MOCK_REPORTS.length} reports</span>
+          <h2 className="text-sm font-semibold">Report Archive</h2>
+          <span className="badge badge-gray">{total}</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
-                <th className="text-left px-4 py-3">Report</th>
-                <th className="text-left px-3 py-3">Type</th>
-                <th className="text-left px-3 py-3">Period</th>
-                <th className="text-left px-3 py-3">Language</th>
-                <th className="text-right px-3 py-3">Generated</th>
-                <th className="text-center px-3 py-3">Status</th>
-                <th className="text-right px-3 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_REPORTS.map((report, i) => {
-                const cfg = STATUS_CONFIG[report.status] ?? STATUS_CONFIG.DRAFT;
-                return (
-                  <tr
-                    key={report.id}
-                    className={`table-row-hover border-b border-[var(--color-border)] last:border-0 ${
-                      i % 2 === 1 ? "bg-[var(--color-slate-50)/30]" : ""
-                    }`}
-                  >
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-start gap-2">
-                        <FileBarChart className="size-4 text-[var(--color-navy-400)] mt-0.5 flex-shrink-0" />
+
+        {reports.length === 0 ? (
+          <div className="p-10 text-center">
+            <FileBarChart className="size-8 text-[var(--color-text-muted)] mx-auto mb-3" />
+            <p className="text-sm font-medium text-[var(--color-text-secondary)]">No reports yet</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">Use the generator above to create your first board report</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-[var(--color-border)]">
+            {reports.map(report => {
+              const content = report.content as Record<string, unknown> | null;
+              const overallStatus = (content?.overallStatus as string) ?? "GREEN";
+              const osCfg = OVERALL_STATUS_CONFIG[overallStatus] ?? OVERALL_STATUS_CONFIG.GREEN;
+              const statusCfg = STATUS_CONFIG[report.status] ?? { cls: "badge-gray", label: report.status };
+              const assetNames = report.assets.map(a => a.asset.name).join(", ");
+
+              return (
+                <div key={report.id} className="px-4 py-4 table-row-hover">
+                  <div className="flex items-start gap-3">
+                    <div className={`size-2.5 rounded-full mt-1.5 flex-shrink-0 ${osCfg.dot}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
                         <div>
                           <p className="text-sm font-semibold leading-tight">{report.title}</p>
-                          {report.titleJa && (
-                            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{report.titleJa}</p>
+                          {assetNames && (
+                            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{assetNames}</p>
                           )}
                         </div>
+                        <span className={`badge flex-shrink-0 ${statusCfg.cls}`}>{statusCfg.label}</span>
                       </div>
-                    </td>
-                    <td className="px-3 py-3.5">
-                      <span className="badge badge-navy text-xs">
-                        {REPORT_TYPE_LABELS[report.reportType] ?? report.reportType}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3.5 text-sm font-numeric text-[var(--color-text-secondary)]">
-                      {formatDate(report.period, "short")}
-                    </td>
-                    <td className="px-3 py-3.5">
-                      <span className="badge badge-gray">
-                        {report.language === "ja" ? "日本語" : "English"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3.5 text-right text-xs font-numeric text-[var(--color-text-secondary)]">
-                      {report.generatedAt ? formatDate(report.generatedAt, "medium") : "—"}
-                    </td>
-                    <td className="px-3 py-3.5 text-center">
-                      <span className={`badge ${cfg.cls}`}>{cfg.label}</span>
-                    </td>
-                    <td className="px-3 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {report.status === "REVIEW" && (
-                          <button className="text-xs font-medium px-2 py-1 rounded border border-[var(--color-navy-300)] text-[var(--color-navy-700)] hover:bg-[var(--color-navy-50)] transition-colors">
-                            Approve
-                          </button>
-                        )}
-                        {(report.status === "PUBLISHED" || report.status === "APPROVED") && (
-                          <button className="text-xs font-medium px-2 py-1 rounded border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-slate-50)] transition-colors">
-                            Download PDF
-                          </button>
-                        )}
-                        {report.status === "DRAFT" && (
-                          <button className="text-xs font-medium px-2 py-1 rounded border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-slate-50)] transition-colors">
-                            Continue Editing
-                          </button>
-                        )}
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="badge badge-gray">{REPORT_TYPE_LABELS[report.reportType] ?? report.reportType}</span>
+                        <span className="text-xs text-[var(--color-text-muted)]">Period: {formatDate(report.period.toISOString(), "medium")}</span>
+                        <span className="text-xs text-[var(--color-text-muted)]">{report.language === "ja" ? "日本語" : "English"}</span>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Sample report structure */}
-      <div className="data-card">
-        <div className="data-card-header">
-          <h2 className="text-sm font-semibold">Monthly Board Report — Structure</h2>
-          <span className="text-xs text-[var(--color-text-muted)]">月次取締役会報告書の構成</span>
-        </div>
-        <div className="data-card-body">
-          <div className="grid grid-cols-1 gap-1 lg:grid-cols-2">
-            {[
-              "01. Executive Summary (概要)",
-              "02. Portfolio Performance Overview (ポートフォリオ実績)",
-              "03. Asset-by-Asset Update (物件別更新)",
-              "04. Covenant Compliance Report (コベナンツ報告)",
-              "05. FX Exposure & Hedging Status (為替エクスポージャー)",
-              "06. Cash Flow Summary (キャッシュフロー概要)",
-              "07. Capital Events & Refinancing Pipeline (資本イベント)",
-              "08. Operational Risk Flags (オペレーショナルリスク)",
-              "09. Upcoming Obligations (今後の義務)",
-              "10. Recommended Actions (推奨アクション)",
-            ].map((item) => (
-              <div key={item} className="flex items-center gap-2 py-1.5 border-b border-[var(--color-border)] last:border-0">
-                <div className="size-1.5 rounded-full bg-[var(--color-navy-400)] flex-shrink-0" />
-                <span className="text-xs text-[var(--color-text-secondary)]">{item}</span>
-              </div>
-            ))}
+                      {typeof content?.overallStatusReason === "string" && (
+                        <p className="text-xs text-[var(--color-text-secondary)] mt-1.5 leading-relaxed">
+                          {content.overallStatusReason}
+                        </p>
+                      )}
+                      {Array.isArray(content?.dataGaps) && (content.dataGaps as string[]).length > 0 && (
+                        <div className="mt-1.5 flex items-start gap-1">
+                          <AlertTriangle className="size-3 text-[var(--color-status-amber)] flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-[var(--color-status-amber)]">
+                            {(content.dataGaps as string[]).length} data gaps flagged
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 mt-2 ml-5.5">
+                    {report.generatedAt && (
+                      <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                        <Sparkles className="size-3" />Generated {formatRelative(report.generatedAt)}
+                      </span>
+                    )}
+                    {report.finalizedAt && (
+                      <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                        <CheckCircle className="size-3" />Approved {formatRelative(report.finalizedAt)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function ReportsLoading() {
+  return (
+    <div className="space-y-5 animate-pulse">
+      <div className="h-8 bg-[var(--color-slate-100)] rounded w-64" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[1,2,3,4].map(i => (
+          <div key={i} className="data-card p-4">
+            <div className="h-3 bg-[var(--color-slate-100)] rounded w-20 mb-2" />
+            <div className="h-7 bg-[var(--color-slate-100)] rounded w-10" />
+          </div>
+        ))}
+      </div>
+      <div className="data-card p-8 text-center">
+        <div className="h-4 bg-[var(--color-slate-100)] rounded w-40 mx-auto" />
+      </div>
+    </div>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <Suspense fallback={<ReportsLoading />}>
+      <ReportsContent />
+    </Suspense>
   );
 }

@@ -6,6 +6,7 @@ import { formatDate, docTypeLabel, countryFlag } from "@/lib/utils";
 import { DocumentUploadSection } from "./upload-section";
 
 export const metadata: Metadata = { title: "Documents" };
+export const dynamic = "force-dynamic";
 
 const DOC_STATUS_CLASS: Record<string, string> = {
   PENDING:    "badge-gray",

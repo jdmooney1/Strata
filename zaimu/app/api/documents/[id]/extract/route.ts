@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { getFileBuffer } from "@/lib/storage";
 import { extractTextFromBuffer, extractFromText } from "@/lib/extract";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -79,6 +80,8 @@ export async function POST(
       },
       include: { extractedFacts: true },
     });
+
+    await createAuditLog({ action: "DOCUMENT_EXTRACT", entity: "Document", entityId: id, after: { factsExtracted: result.facts.length, status: "EXTRACTED" } });
 
     return Response.json({
       document: updatedDoc,

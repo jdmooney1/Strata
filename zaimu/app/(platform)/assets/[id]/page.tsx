@@ -92,6 +92,23 @@ async function AssetDetailContent({ id }: { id: string }) {
 
   const allCovenants = asset.loans.flatMap((l) => l.covenants);
 
+  // WAULT — Weighted Average Unexpired Lease Term (years, weighted by area)
+  const activeLeases = asset.leases.filter((l) => l.status === "ACTIVE");
+  const todayMs = Date.now();
+  const wault = (() => {
+    const leasesWithArea = activeLeases.filter((l) => l.area != null);
+    const totalArea = leasesWithArea.reduce((s, l) => s + Number(l.area), 0);
+    if (totalArea === 0 || leasesWithArea.length === 0) return null;
+    const weightedYears = leasesWithArea.reduce((s, l) => {
+      const yearsRemaining = Math.max(
+        0,
+        (l.leaseEnd.getTime() - todayMs) / (1000 * 60 * 60 * 24 * 365.25)
+      );
+      return s + yearsRemaining * Number(l.area);
+    }, 0);
+    return weightedYears / totalArea;
+  })();
+
   const extractedDocs = asset.documents.filter(
     (d) => d.status === "EXTRACTED" || d.status === "REVIEWED"
   ).length;
@@ -165,7 +182,7 @@ async function AssetDetailContent({ id }: { id: string }) {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <div className="data-card p-4">
           <p className="section-label">Current Valuation</p>
           <p className="text-xs text-[var(--color-text-muted)]">現在評価額</p>
@@ -206,6 +223,21 @@ async function AssetDetailContent({ id }: { id: string }) {
           </p>
           <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
             {asset.totalArea != null ? Number(asset.totalArea).toLocaleString() : "—"} {asset.areaUnit}
+          </p>
+        </div>
+
+        <div className="data-card p-4">
+          <p className="section-label">WAULT</p>
+          <p className="text-xs text-[var(--color-text-muted)]">加重平均残存期間</p>
+          <p
+            className={`text-2xl font-semibold font-numeric mt-1 ${
+              wault == null ? "" : wault <= 1 ? "text-[var(--color-status-red)]" : wault <= 3 ? "text-[var(--color-status-amber)]" : ""
+            }`}
+          >
+            {wault != null ? `${wault.toFixed(1)}yr` : "—"}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            {activeLeases.length} active lease{activeLeases.length !== 1 ? "s" : ""}
           </p>
         </div>
 

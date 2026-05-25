@@ -1,22 +1,13 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
-  TrendingDown,
-  Clock,
   CheckSquare,
   ArrowRight,
-  Building2,
   RefreshCw,
 } from "lucide-react";
-import {
-  MOCK_ASSETS,
-  MOCK_ALERTS,
-  MOCK_TASKS,
-  PORTFOLIO_STATS,
-  MOCK_FX_RATES,
-  FX_EXPOSURES,
-} from "@/lib/mock-data";
+import { db } from "@/lib/db";
 import {
   formatMillions,
   formatPercent,
@@ -28,43 +19,82 @@ import {
   countryFlag,
   priorityBadgeClass,
   taskStatusBadgeClass,
-  formatCurrency,
 } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
+export const dynamic = "force-dynamic";
 
-export default function DashboardPage() {
-  const criticalAlerts = MOCK_ALERTS.filter(
-    (a) => !a.resolved && (a.severity === "CRITICAL" || a.severity === "HIGH")
+const ORG_ID = "org_sanyo_001";
+
+async function DashboardContent() {
+  const [assets, allLoans, alerts, tasks, fxRates] = await Promise.all([
+    db.asset.findMany({
+      where: { orgId: ORG_ID },
+      include: { loans: { include: { covenants: true } } },
+    }),
+    db.loan.findMany({ where: { asset: { orgId: ORG_ID } } }),
+    db.alert.findMany({
+      where: { asset: { orgId: ORG_ID }, resolved: false },
+      orderBy: { triggeredAt: "desc" },
+      take: 10,
+    }),
+    db.task.findMany({
+      where: { orgId: ORG_ID, status: { notIn: ["COMPLETE", "CANCELLED"] } },
+      orderBy: { dueDate: "asc" },
+      take: 8,
+    }),
+    db.fxRate.findMany({
+      where: { orgId: ORG_ID },
+      orderBy: { rateDate: "desc" },
+      take: 20,
+    }),
+  ]);
+
+  // Computed KPIs
+  const totalDebt = allLoans.reduce((s, l) => s + Number(l.currentBalance), 0);
+  const criticalAlerts = alerts.filter(
+    (a) => a.severity === "CRITICAL" || a.severity === "HIGH"
   );
+  const covenantBreaches = assets.filter(
+    (a) => a.covenantStatus === "BREACH"
+  ).length;
 
-  const openTasks = MOCK_TASKS.filter(
-    (t) => t.status === "OPEN" || t.status === "IN_PROGRESS"
-  ).slice(0, 5);
+  const assetsWithOccupancy = assets.filter((a) => a.occupancyRate != null);
+  const avgOccupancy =
+    assetsWithOccupancy.length > 0
+      ? assetsWithOccupancy.reduce(
+          (s, a) => s + Number(a.occupancyRate),
+          0
+        ) / assetsWithOccupancy.length
+      : 0;
+
+  // Unique FX pairs (latest rate per pair)
+  const fxPairsSeen = new Set<string>();
+  const latestFxRates = fxRates.filter((r) => {
+    const key = `${r.baseCurrency}/${r.quoteCurrency}`;
+    if (fxPairsSeen.has(key)) return false;
+    fxPairsSeen.add(key);
+    return true;
+  });
+
+  const criticalOnly = alerts.filter((a) => a.severity === "CRITICAL");
 
   return (
     <div className="space-y-5">
       {/* Critical Alert Banner */}
-      {criticalAlerts.filter((a) => a.severity === "CRITICAL").length > 0 && (
+      {criticalOnly.length > 0 && (
         <div className="alert-critical rounded-md px-4 py-3 flex items-start gap-3">
           <AlertTriangle className="size-4 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-sm">
-              {criticalAlerts.filter((a) => a.severity === "CRITICAL").length}{" "}
-              Critical Alert
-              {criticalAlerts.filter((a) => a.severity === "CRITICAL").length >
-              1
-                ? "s"
-                : ""}{" "}
-              Require Immediate Attention
+              {criticalOnly.length} Critical Alert
+              {criticalOnly.length > 1 ? "s" : ""} Require Immediate Attention
             </p>
-            {criticalAlerts
-              .filter((a) => a.severity === "CRITICAL")
-              .map((a) => (
-                <p key={a.id} className="text-xs mt-0.5 opacity-80">
-                  {a.title}
-                </p>
-              ))}
+            {criticalOnly.map((a) => (
+              <p key={a.id} className="text-xs mt-0.5 opacity-80">
+                {a.title}
+              </p>
+            ))}
           </div>
           <Link
             href="/alerts"
@@ -80,33 +110,33 @@ export default function DashboardPage() {
         <p className="section-label mb-3">Portfolio Overview</p>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
-            label="Total AUM"
-            labelJa="総運用資産"
-            value={`¥${(PORTFOLIO_STATS.totalAumJpy / 1e9).toFixed(1)}B`}
-            sub={formatMillions(PORTFOLIO_STATS.totalAumUsd, "USD")}
+            label="Total Assets"
+            labelJa="総資産数"
+            value={`${assets.length}`}
+            sub="Active portfolio assets"
             trend={null}
           />
           <StatCard
             label="Total Debt"
             labelJa="総負債"
-            value={formatMillions(PORTFOLIO_STATS.totalDebtUsd, "USD")}
-            sub={`Avg LTV ${formatPercent(PORTFOLIO_STATS.averageLtv)}`}
+            value={formatMillions(totalDebt, "USD")}
+            sub="All loan currencies combined"
             trend={null}
           />
           <StatCard
             label="Portfolio Occupancy"
             labelJa="ポートフォリオ稼働率"
-            value={formatPercent(PORTFOLIO_STATS.portfolioOccupancy)}
-            sub={`${PORTFOLIO_STATS.assetCount} assets`}
-            trend={{ direction: "down", value: "-0.8%", label: "vs last month" }}
+            value={formatPercent(avgOccupancy)}
+            sub={`${assetsWithOccupancy.length} assets with occupancy data`}
+            trend={null}
           />
           <StatCard
-            label="Avg DSCR"
-            labelJa="平均DSCR"
-            value={`${PORTFOLIO_STATS.averageDscr.toFixed(2)}x`}
-            sub={`${PORTFOLIO_STATS.covenantBreaches} breaches`}
+            label="Covenant Alerts"
+            labelJa="コベナント警告"
+            value={`${covenantBreaches}`}
+            sub={`${criticalAlerts.length} critical / high alerts open`}
             trend={
-              PORTFOLIO_STATS.covenantBreaches > 0
+              covenantBreaches > 0
                 ? { direction: "alert", value: "Action required" }
                 : null
             }
@@ -146,7 +176,7 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {MOCK_ASSETS.map((asset, i) => (
+                  {assets.map((asset, i) => (
                     <tr
                       key={asset.id}
                       className={`table-row-hover border-b border-[var(--color-border)] last:border-0 ${
@@ -178,7 +208,7 @@ export default function DashboardPage() {
                       <td className="px-3 py-3 text-right font-numeric">
                         <p className="text-sm font-medium">
                           {formatMillions(
-                            asset.currentValuation ?? 0,
+                            Number(asset.currentValuation ?? 0),
                             asset.currency
                           )}
                         </p>
@@ -189,14 +219,16 @@ export default function DashboardPage() {
                       <td className="px-3 py-3 text-right font-numeric">
                         <span
                           className={`text-sm font-medium ${
-                            (asset.occupancyRate ?? 0) >= 90
+                            Number(asset.occupancyRate ?? 0) >= 90
                               ? "text-[var(--color-status-green)]"
-                              : (asset.occupancyRate ?? 0) >= 75
+                              : Number(asset.occupancyRate ?? 0) >= 75
                               ? "text-[var(--color-status-amber)]"
                               : "text-[var(--color-status-red)]"
                           }`}
                         >
-                          {formatPercent(asset.occupancyRate ?? 0)}
+                          {asset.occupancyRate != null
+                            ? formatPercent(Number(asset.occupancyRate))
+                            : "—"}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-center">
@@ -240,36 +272,39 @@ export default function DashboardPage() {
                 href="/alerts"
                 className="text-xs text-[var(--color-text-link)] hover:underline"
               >
-                {MOCK_ALERTS.filter((a) => !a.resolved).length} open
+                {alerts.length} open
               </Link>
             </div>
             <div className="divide-y divide-[var(--color-border)]">
-              {MOCK_ALERTS.filter((a) => !a.resolved)
-                .slice(0, 4)
-                .map((alert) => (
-                  <div
-                    key={alert.id}
-                    className="px-4 py-3 flex items-start gap-2.5"
-                  >
-                    <span
-                      className={`status-dot mt-1.5 flex-shrink-0 ${
-                        alert.severity === "CRITICAL"
-                          ? "status-dot-red"
-                          : alert.severity === "HIGH"
-                          ? "status-dot-amber"
-                          : "status-dot-blue"
-                      }`}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold leading-tight text-[var(--color-text-primary)] truncate">
-                        {alert.title}
-                      </p>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
-                        {alert.message}
-                      </p>
-                    </div>
+              {alerts.slice(0, 4).map((alert) => (
+                <div
+                  key={alert.id}
+                  className="px-4 py-3 flex items-start gap-2.5"
+                >
+                  <span
+                    className={`status-dot mt-1.5 flex-shrink-0 ${
+                      alert.severity === "CRITICAL"
+                        ? "status-dot-red"
+                        : alert.severity === "HIGH"
+                        ? "status-dot-amber"
+                        : "status-dot-blue"
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold leading-tight text-[var(--color-text-primary)] truncate">
+                      {alert.title}
+                    </p>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
+                      {alert.message}
+                    </p>
                   </div>
-                ))}
+                </div>
+              ))}
+              {alerts.length === 0 && (
+                <p className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
+                  No active alerts
+                </p>
+              )}
             </div>
           </div>
 
@@ -284,11 +319,11 @@ export default function DashboardPage() {
                 href="/tasks"
                 className="text-xs text-[var(--color-text-link)] hover:underline"
               >
-                {openTasks.length} open
+                {tasks.length} open
               </Link>
             </div>
             <div className="divide-y divide-[var(--color-border)]">
-              {openTasks.map((task) => (
+              {tasks.slice(0, 5).map((task) => (
                 <div
                   key={task.id}
                   className="px-4 py-2.5 flex items-start gap-2.5"
@@ -317,6 +352,11 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ))}
+              {tasks.length === 0 && (
+                <p className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
+                  No open tasks
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -324,19 +364,16 @@ export default function DashboardPage() {
 
       {/* Bottom row */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* FX Exposure */}
+        {/* FX Rates */}
         <div className="data-card">
           <div className="data-card-header">
             <div>
-              <h2 className="text-sm font-semibold">FX Exposure</h2>
+              <h2 className="text-sm font-semibold">FX Rates</h2>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                為替エクスポージャー
+                為替レート
               </p>
             </div>
             <div className="flex gap-2 items-center">
-              <span className="text-xs text-[var(--color-text-muted)]">
-                Base: JPY
-              </span>
               <Link
                 href="/treasury"
                 className="text-xs text-[var(--color-text-link)] hover:underline"
@@ -349,72 +386,44 @@ export default function DashboardPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--color-border)]">
-                  <th className="text-left px-4 py-2.5">Currency</th>
-                  <th className="text-right px-3 py-2.5">Gross</th>
-                  <th className="text-right px-3 py-2.5">Hedged</th>
-                  <th className="text-right px-3 py-2.5">Rate (JPY)</th>
-                  <th className="text-right px-3 py-2.5">P&L (JPY)</th>
+                  <th className="text-left px-4 py-2.5">Pair</th>
+                  <th className="text-right px-3 py-2.5">Rate</th>
+                  <th className="text-right px-3 py-2.5">Date</th>
+                  <th className="text-right px-3 py-2.5">Source</th>
                 </tr>
               </thead>
               <tbody>
-                {FX_EXPOSURES.map((fx) => {
-                  const rate =
-                    MOCK_FX_RATES[
-                      `${fx.currency}JPY` as keyof typeof MOCK_FX_RATES
-                    ];
-                  return (
-                    <tr
-                      key={fx.currency}
-                      className="border-b border-[var(--color-border)] last:border-0 table-row-hover"
+                {latestFxRates.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-[var(--color-border)] last:border-0 table-row-hover"
+                  >
+                    <td className="px-4 py-3">
+                      <span className="font-semibold text-sm">
+                        {r.baseCurrency}/{r.quoteCurrency}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right font-numeric text-sm">
+                      {Number(r.rate).toFixed(4)}
+                    </td>
+                    <td className="px-3 py-3 text-right text-xs text-[var(--color-text-muted)]">
+                      {formatDate(r.rateDate, "short")}
+                    </td>
+                    <td className="px-3 py-3 text-right text-xs text-[var(--color-text-muted)]">
+                      {r.source}
+                    </td>
+                  </tr>
+                ))}
+                {latestFxRates.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-4 py-3 text-xs text-[var(--color-text-muted)]"
                     >
-                      <td className="px-4 py-3">
-                        <span className="font-semibold text-sm">
-                          {fx.currency}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric text-sm">
-                        {formatMillions(fx.grossExposure, fx.currency)}
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric">
-                        <div>
-                          <span className="text-sm">
-                            {formatPercent(fx.hedgePct)}
-                          </span>
-                          <div
-                            className="progress-bar mt-1"
-                            style={{ width: 60 }}
-                          >
-                            <div
-                              className="progress-bar-fill"
-                              style={{
-                                width: `${fx.hedgePct}%`,
-                                backgroundColor:
-                                  fx.hedgePct >= 70
-                                    ? "var(--color-status-green)"
-                                    : fx.hedgePct >= 40
-                                    ? "var(--color-status-amber)"
-                                    : "var(--color-status-red)",
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric text-sm text-[var(--color-text-secondary)]">
-                        {rate?.toFixed(2) ?? "—"}
-                      </td>
-                      <td
-                        className={`px-3 py-3 text-right font-numeric text-sm font-medium ${
-                          fx.pnlJpy >= 0
-                            ? "text-[var(--color-status-green)]"
-                            : "text-[var(--color-status-red)]"
-                        }`}
-                      >
-                        {fx.pnlJpy >= 0 ? "+" : ""}¥
-                        {(fx.pnlJpy / 1e6).toFixed(0)}M
-                      </td>
-                    </tr>
-                  );
-                })}
+                      No FX rates recorded
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -433,7 +442,8 @@ export default function DashboardPage() {
           </div>
           <div className="data-card-body">
             <div className="space-y-1">
-              {MOCK_ASSETS.filter((a) => a.refinancingDate)
+              {assets
+                .filter((a) => a.refinancingDate)
                 .sort(
                   (a, b) =>
                     new Date(a.refinancingDate!).getTime() -
@@ -443,7 +453,8 @@ export default function DashboardPage() {
                   const date = new Date(asset.refinancingDate!);
                   const now = new Date();
                   const monthsUntil = Math.ceil(
-                    (date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30)
+                    (date.getTime() - now.getTime()) /
+                      (1000 * 60 * 60 * 24 * 30)
                   );
                   const urgency =
                     monthsUntil <= 12
@@ -474,7 +485,9 @@ export default function DashboardPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className={`text-sm font-semibold font-numeric ${urgency}`}>
+                        <p
+                          className={`text-sm font-semibold font-numeric ${urgency}`}
+                        >
                           {formatDate(asset.refinancingDate, "short")}
                         </p>
                         <p className={`text-xs ${urgency}`}>
@@ -484,6 +497,11 @@ export default function DashboardPage() {
                     </div>
                   );
                 })}
+              {assets.filter((a) => a.refinancingDate).length === 0 && (
+                <p className="text-xs text-[var(--color-text-muted)] py-2">
+                  No refinancing dates set
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -493,18 +511,48 @@ export default function DashboardPage() {
       <div className="ai-insight">
         <p className="ai-insight-label">AI Portfolio Analysis — 2026年5月</p>
         <p className="text-sm text-[var(--color-navy-900)] leading-relaxed">
-          Portfolio performance remains broadly stable with two material risk items requiring attention.{" "}
-          <strong>Canary Wharf</strong> presents the most urgent operational risk: the DSCR covenant breach
-          (1.12x vs. 1.30x threshold) combined with the Morgan Stanley lease expiry creates compounding
-          LTV pressure as the June 2026 loan maturity approaches. Recommended immediate action: lender
-          notification within 5 business days and appointment of a refinancing adviser by end of May.
-          Separately, the <strong>Goldman Sachs renewal</strong> at 1 Market Plaza should be prioritised
-          before the August break clause window closes — tenant engagement is progressing constructively.
-          FX headwinds from GBP depreciation represent a JPY 890M unrealised loss, though 80% hedge
-          coverage limits further downside exposure.
+          Portfolio performance remains broadly stable with two material risk
+          items requiring attention. <strong>Canary Wharf</strong> presents the
+          most urgent operational risk: the DSCR covenant breach (1.12x vs.
+          1.30x threshold) combined with the Morgan Stanley lease expiry creates
+          compounding LTV pressure as the June 2026 loan maturity approaches.
+          Recommended immediate action: lender notification within 5 business
+          days and appointment of a refinancing adviser by end of May.
+          Separately, the <strong>Goldman Sachs renewal</strong> at 1 Market
+          Plaza should be prioritised before the August break clause window
+          closes — tenant engagement is progressing constructively. FX
+          headwinds from GBP depreciation represent a JPY 890M unrealised loss,
+          though 80% hedge coverage limits further downside exposure.
         </p>
       </div>
     </div>
+  );
+}
+
+function DashboardLoading() {
+  return (
+    <div className="space-y-5 animate-pulse">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="data-card p-4 h-24 bg-[var(--color-slate-50)]" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="lg:col-span-2 data-card h-64 bg-[var(--color-slate-50)]" />
+        <div className="space-y-4">
+          <div className="data-card h-32 bg-[var(--color-slate-50)]" />
+          <div className="data-card h-32 bg-[var(--color-slate-50)]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardLoading />}>
+      <DashboardContent />
+    </Suspense>
   );
 }
 
@@ -545,7 +593,11 @@ function StatCard({
               : "text-[var(--color-status-amber)]"
           }`}
         >
-          {trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "⚠"}{" "}
+          {trend.direction === "up"
+            ? "↑"
+            : trend.direction === "down"
+            ? "↓"
+            : "⚠"}{" "}
           {trend.value}
           {trend.label && (
             <span className="text-[var(--color-text-muted)] font-normal">

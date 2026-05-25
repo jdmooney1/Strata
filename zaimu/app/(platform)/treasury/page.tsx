@@ -1,45 +1,84 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
-import { DollarSign, TrendingDown, TrendingUp } from "lucide-react";
-import {
-  MOCK_LOANS,
-  MOCK_ASSETS,
-  MOCK_FX_RATES,
-  FX_EXPOSURES,
-  PORTFOLIO_STATS,
-} from "@/lib/mock-data";
+import { db } from "@/lib/db";
 import {
   formatMillions,
   formatPercent,
   formatDate,
   countryFlag,
+  covenantBadgeClass,
+  covenantLabel,
 } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Treasury & FX" };
+export const dynamic = "force-dynamic";
 
-export default function TreasuryPage() {
-  const assetsMap = Object.fromEntries(MOCK_ASSETS.map((a) => [a.id, a]));
+const ORG_ID = "org_sanyo_001";
 
-  const totalDebtUsd = MOCK_LOANS.reduce((sum, l) => {
-    const rates: Record<string, number> = { USD: 1, AUD: 0.64, GBP: 1.26, EUR: 1.08 };
-    return sum + l.currentBalance * (rates[l.currency] ?? 1);
-  }, 0);
+async function TreasuryContent() {
+  const [assets, loans, fxRates] = await Promise.all([
+    db.asset.findMany({
+      where: { orgId: ORG_ID },
+      select: { id: true, name: true, country: true, currency: true },
+    }),
+    db.loan.findMany({
+      where: { asset: { orgId: ORG_ID } },
+      include: { covenants: true },
+      orderBy: { maturityDate: "asc" },
+    }),
+    db.fxRate.findMany({
+      where: { orgId: ORG_ID },
+      orderBy: [{ baseCurrency: "asc" }, { rateDate: "desc" }],
+    }),
+  ]);
 
-  // Upcoming amortisation payments (simulated)
-  const upcomingPayments = [
-    { date: "2026-06-30", lender: "Wells Fargo Bank",       assetId: "ast_001", currency: "USD", amount: 420000,  type: "Interest" },
-    { date: "2026-06-30", lender: "ANZ Banking Group",      assetId: "ast_002", currency: "AUD", amount: 398000,  type: "Interest" },
-    { date: "2026-06-30", lender: "JPMorgan Chase",         assetId: "ast_003", currency: "USD", amount: 620000,  type: "Interest + Principal" },
-    { date: "2026-06-30", lender: "HSBC UK",               assetId: "ast_004", currency: "GBP", amount: 738000,  type: "Interest" },
-    { date: "2026-06-30", lender: "CBA",                   assetId: "ast_005", currency: "AUD", amount: 275000,  type: "Interest" },
-    { date: "2026-09-30", lender: "Wells Fargo Bank",       assetId: "ast_001", currency: "USD", amount: 420000,  type: "Interest" },
-    { date: "2026-09-30", lender: "ANZ Banking Group",      assetId: "ast_002", currency: "AUD", amount: 398000,  type: "Interest" },
-    { date: "2026-09-30", lender: "HSBC UK",               assetId: "ast_004", currency: "GBP", amount: 738000,  type: "Interest" },
-  ];
+  // Build assets map
+  const assetsMap = Object.fromEntries(assets.map((a) => [a.id, a]));
 
-  const loansByMaturity = [...MOCK_LOANS].sort(
-    (a, b) => new Date(a.maturityDate).getTime() - new Date(b.maturityDate).getTime()
-  );
+  // Total debt per currency
+  const debtByCurrency: Record<string, number> = {};
+  for (const l of loans) {
+    debtByCurrency[l.currency] =
+      (debtByCurrency[l.currency] ?? 0) + Number(l.currentBalance);
+  }
+
+  // Avg interest rate
+  const avgInterestRate =
+    loans.length > 0
+      ? (loans.reduce((s, l) => s + Number(l.interestRate), 0) /
+          loans.length) *
+        100
+      : 0;
+
+  // Covenant summary across loans
+  const allCovenants = loans.flatMap((l) => l.covenants);
+  const breachCovenants = allCovenants.filter(
+    (c) => c.status === "BREACH"
+  ).length;
+  const watchCovenants = allCovenants.filter(
+    (c) => c.status === "WATCH"
+  ).length;
+
+  // FX rates — unique pairs (latest per pair)
+  const fxPairsSeen = new Set<string>();
+  const latestFxRates = fxRates.filter((r) => {
+    const key = `${r.baseCurrency}/${r.quoteCurrency}`;
+    if (fxPairsSeen.has(key)) return false;
+    fxPairsSeen.add(key);
+    return true;
+  });
+
+  // Debt maturity wall — group by year
+  const maturityByYear: Record<number, number> = {};
+  for (const l of loans) {
+    const year = new Date(l.maturityDate).getFullYear();
+    maturityByYear[year] = (maturityByYear[year] ?? 0) + Number(l.currentBalance);
+  }
+  const maturityYears = Object.entries(maturityByYear)
+    .sort(([a], [b]) => Number(a) - Number(b));
+
+  const maxMaturityAmount = Math.max(...Object.values(maturityByYear), 1);
 
   return (
     <div className="space-y-5">
@@ -53,273 +92,453 @@ export default function TreasuryPage() {
 
       {/* Treasury KPIs */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          {
-            label: "Total Debt (USD eq.)",
-            labelJa: "総負債（USD換算）",
-            value: formatMillions(totalDebtUsd, "USD"),
-            sub: `Avg LTV ${formatPercent(PORTFOLIO_STATS.averageLtv)}`,
-          },
-          {
-            label: "Avg Interest Rate",
-            labelJa: "平均金利",
-            value: formatPercent(
-              (MOCK_LOANS.reduce((s, l) => s + l.interestRate, 0) / MOCK_LOANS.length) * 100,
-              2
-            ),
-            sub: "Blended across portfolio",
-          },
-          {
-            label: "Avg DSCR",
-            labelJa: "平均DSCR",
-            value: `${PORTFOLIO_STATS.averageDscr.toFixed(2)}x`,
-            sub: `${PORTFOLIO_STATS.covenantBreaches} breach · ${PORTFOLIO_STATS.covenantWatch} watch`,
-            alert: PORTFOLIO_STATS.covenantBreaches > 0,
-          },
-          {
-            label: "FX P&L (Unrealised)",
-            labelJa: "為替損益（未実現）",
-            value: `¥${((FX_EXPOSURES.reduce((s, f) => s + f.pnlJpy, 0)) / 1e6).toFixed(0)}M`,
-            sub: "Net across USD / GBP / AUD",
-            negative: FX_EXPOSURES.reduce((s, f) => s + f.pnlJpy, 0) < 0,
-          },
-        ].map((s) => (
-          <div key={s.label} className="data-card p-4">
-            <p className="section-label">{s.label}</p>
-            <p className="text-xs text-[var(--color-text-muted)]">{s.labelJa}</p>
-            <p className={`text-xl font-semibold font-numeric mt-1 ${
-              s.alert ? "text-[var(--color-status-red)]" :
-              s.negative ? "text-[var(--color-status-red)]" : ""
-            }`}>
-              {s.value}
-            </p>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{s.sub}</p>
+        <div className="data-card p-4">
+          <p className="section-label">Total Loans</p>
+          <p className="text-xs text-[var(--color-text-muted)]">ローン数</p>
+          <p className="text-xl font-semibold font-numeric mt-1">
+            {loans.length}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            across {assets.length} assets
+          </p>
+        </div>
+        <div className="data-card p-4">
+          <p className="section-label">Total Debt</p>
+          <p className="text-xs text-[var(--color-text-muted)]">総負債</p>
+          <div className="mt-1">
+            {Object.entries(debtByCurrency).map(([cur, val]) => (
+              <p key={cur} className="text-sm font-semibold font-numeric">
+                {formatMillions(val, cur)}
+                <span className="text-xs text-[var(--color-text-muted)] ml-1">
+                  {cur}
+                </span>
+              </p>
+            ))}
+            {Object.keys(debtByCurrency).length === 0 && (
+              <p className="text-sm text-[var(--color-text-muted)]">No debt</p>
+            )}
           </div>
-        ))}
+        </div>
+        <div className="data-card p-4">
+          <p className="section-label">Avg Interest Rate</p>
+          <p className="text-xs text-[var(--color-text-muted)]">平均金利</p>
+          <p className="text-xl font-semibold font-numeric mt-1">
+            {formatPercent(avgInterestRate, 2)}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            Blended across portfolio
+          </p>
+        </div>
+        <div className="data-card p-4">
+          <p className="section-label">FX Pairs Stored</p>
+          <p className="text-xs text-[var(--color-text-muted)]">為替ペア数</p>
+          <p className="text-xl font-semibold font-numeric mt-1">
+            {latestFxRates.length}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            {breachCovenants > 0 ? (
+              <span className="text-[var(--color-status-red)] font-semibold">
+                {breachCovenants} covenant breach{breachCovenants > 1 ? "es" : ""}
+              </span>
+            ) : (
+              `${watchCovenants} watch · ${allCovenants.length} total covenants`
+            )}
+          </p>
+        </div>
       </div>
 
-      {/* FX Exposure Table */}
+      {/* Debt Maturity Wall */}
+      {maturityYears.length > 0 && (
+        <div className="data-card">
+          <div className="data-card-header">
+            <div>
+              <h2 className="text-sm font-semibold">Debt Maturity Wall</h2>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                満期別負債残高
+              </p>
+            </div>
+          </div>
+          <div className="px-4 py-3">
+            <div className="flex items-end gap-3">
+              {maturityYears.map(([year, amount]) => {
+                const heightPct = (amount / maxMaturityAmount) * 100;
+                const barColor =
+                  Number(year) <= new Date().getFullYear() + 1
+                    ? "var(--color-status-red)"
+                    : Number(year) <= new Date().getFullYear() + 2
+                    ? "var(--color-status-amber)"
+                    : "var(--color-navy-400)";
+                return (
+                  <div
+                    key={year}
+                    className="flex flex-col items-center gap-1 flex-1"
+                  >
+                    <p className="text-xs font-numeric text-[var(--color-text-muted)]">
+                      {formatMillions(amount, "USD").replace("$", "")}
+                    </p>
+                    <div
+                      className="w-full rounded-t"
+                      style={{
+                        height: `${Math.max(heightPct, 4)}px`,
+                        minHeight: "4px",
+                        maxHeight: "80px",
+                        backgroundColor: barColor,
+                      }}
+                    />
+                    <p className="text-xs font-semibold">{year}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loan Summary by Maturity */}
       <div className="data-card">
         <div className="data-card-header">
-          <div>
-            <h2 className="text-sm font-semibold">FX Exposure Analysis</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">為替エクスポージャー分析</p>
-          </div>
-          <span className="text-xs text-[var(--color-text-muted)]">Base currency: JPY</span>
+          <h2 className="text-sm font-semibold">Debt Maturity Schedule</h2>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            ローン満期スケジュール
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
-                <th className="text-left px-4 py-3">Currency</th>
-                <th className="text-right px-3 py-3">Spot Rate</th>
-                <th className="text-right px-3 py-3">Gross Exposure</th>
-                <th className="text-right px-3 py-3">Hedged</th>
-                <th className="text-right px-3 py-3">Hedge %</th>
-                <th className="text-right px-3 py-3">Unhedged JPY</th>
-                <th className="text-right px-3 py-3">Unrealised P&L</th>
+                <th className="text-left px-4 py-3">Lender / Asset</th>
+                <th className="text-left px-3 py-3">Currency</th>
+                <th className="text-right px-3 py-3">Balance</th>
+                <th className="text-right px-3 py-3">Rate</th>
+                <th className="text-right px-3 py-3">Maturity</th>
+                <th className="text-right px-3 py-3">LTV</th>
+                <th className="text-right px-3 py-3">DSCR</th>
+                <th className="text-center px-3 py-3">Status</th>
               </tr>
             </thead>
             <tbody>
-              {FX_EXPOSURES.map((fx) => {
-                const rate = MOCK_FX_RATES[`${fx.currency}JPY` as keyof typeof MOCK_FX_RATES];
-                const unhedgedAmt = fx.grossExposure - fx.hedged;
-                const unhedgedJpy = unhedgedAmt * (rate ?? 0);
-
+              {loans.map((loan) => {
+                const asset = assetsMap[loan.assetId];
+                const monthsToMaturity = Math.ceil(
+                  (new Date(loan.maturityDate).getTime() - Date.now()) /
+                    (1000 * 60 * 60 * 24 * 30)
+                );
                 return (
-                  <tr key={fx.currency} className="border-b border-[var(--color-border)] last:border-0 table-row-hover">
+                  <tr
+                    key={loan.id}
+                    className="border-b border-[var(--color-border)] last:border-0 table-row-hover"
+                  >
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl font-semibold">{fx.currency}</span>
-                        <span className={`badge ${
-                          fx.hedgePct >= 70 ? "badge-green" :
-                          fx.hedgePct >= 40 ? "badge-amber" :
-                          "badge-red"
-                        }`}>
-                          {fx.hedgePct >= 70 ? "Adequately Hedged" : fx.hedgePct >= 40 ? "Partially Hedged" : "Under-Hedged"}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-numeric">
-                      <p className="text-sm font-medium">{rate?.toFixed(2)}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">JPY/{fx.currency}</p>
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-numeric">
-                      <p className="text-sm">{formatMillions(fx.grossExposure, fx.currency)}</p>
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-numeric">
-                      <p className="text-sm">{formatMillions(fx.hedged, fx.currency)}</p>
-                    </td>
-                    <td className="px-3 py-3.5 text-right">
-                      <div>
-                        <p className="text-sm font-numeric">{formatPercent(fx.hedgePct)}</p>
-                        <div className="progress-bar mt-1" style={{ width: 60, marginLeft: "auto" }}>
-                          <div
-                            className="progress-bar-fill"
-                            style={{
-                              width: `${fx.hedgePct}%`,
-                              backgroundColor:
-                                fx.hedgePct >= 70 ? "var(--color-status-green)" :
-                                fx.hedgePct >= 40 ? "var(--color-status-amber)" :
-                                "var(--color-status-red)",
-                            }}
-                          />
+                      <div className="flex items-start gap-2">
+                        {asset && (
+                          <span className="text-base mt-0.5">
+                            {countryFlag(asset.country)}
+                          </span>
+                        )}
+                        <div>
+                          <p className="text-xs font-semibold">
+                            {loan.lenderName}
+                          </p>
+                          {asset && (
+                            <Link
+                              href={`/assets/${asset.id}`}
+                              className="text-xs text-[var(--color-text-muted)] hover:underline"
+                            >
+                              {asset.name}
+                            </Link>
+                          )}
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="badge badge-navy">
+                              {loan.loanType}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3.5 text-right font-numeric">
-                      <p className="text-sm">¥{(unhedgedJpy / 1e9).toFixed(1)}B</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">{formatMillions(unhedgedAmt, fx.currency)} unhedged</p>
+                    <td className="px-3 py-3.5 text-sm font-semibold">
+                      {loan.currency}
                     </td>
-                    <td className={`px-3 py-3.5 text-right font-numeric font-semibold ${
-                      fx.pnlJpy >= 0 ? "text-[var(--color-status-green)]" : "text-[var(--color-status-red)]"
-                    }`}>
-                      {fx.pnlJpy >= 0 ? "+" : ""}¥{(fx.pnlJpy / 1e6).toFixed(0)}M
+                    <td className="px-3 py-3.5 text-right font-numeric text-sm font-semibold">
+                      {formatMillions(Number(loan.currentBalance), loan.currency)}
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-numeric text-xs text-[var(--color-text-secondary)]">
+                      {formatPercent(Number(loan.interestRate) * 100, 2)}{" "}
+                      {loan.rateType === "FIXED"
+                        ? "fixed"
+                        : loan.benchmark
+                        ? `${loan.benchmark}+${formatPercent(Number(loan.margin ?? 0) * 100, 2)}`
+                        : "float"}
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-numeric">
+                      <p
+                        className={`text-xs font-semibold ${
+                          monthsToMaturity <= 12
+                            ? "text-[var(--color-status-red)]"
+                            : monthsToMaturity <= 18
+                            ? "text-[var(--color-status-amber)]"
+                            : "text-[var(--color-text-muted)]"
+                        }`}
+                      >
+                        {formatDate(loan.maturityDate, "short")}
+                      </p>
+                      <p
+                        className={`text-xs ${
+                          monthsToMaturity <= 12
+                            ? "text-[var(--color-status-red)]"
+                            : monthsToMaturity <= 18
+                            ? "text-[var(--color-status-amber)]"
+                            : "text-[var(--color-text-muted)]"
+                        }`}
+                      >
+                        {monthsToMaturity}mo
+                      </p>
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-numeric">
+                      {loan.ltv != null ? (
+                        <span
+                          className={`text-sm font-medium ${
+                            Number(loan.ltv) <= 55
+                              ? "text-[var(--color-status-green)]"
+                              : Number(loan.ltv) <= 65
+                              ? "text-[var(--color-status-amber)]"
+                              : "text-[var(--color-status-red)]"
+                          }`}
+                        >
+                          {formatPercent(Number(loan.ltv))}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-[var(--color-text-muted)]">
+                          —
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3.5 text-right font-numeric">
+                      {loan.dscr != null ? (
+                        <span
+                          className={`text-sm font-medium ${
+                            Number(loan.dscr) >= 1.5
+                              ? "text-[var(--color-status-green)]"
+                              : Number(loan.dscr) >= 1.2
+                              ? "text-[var(--color-status-amber)]"
+                              : "text-[var(--color-status-red)]"
+                          }`}
+                        >
+                          {Number(loan.dscr).toFixed(2)}x
+                        </span>
+                      ) : (
+                        <span className="text-sm text-[var(--color-text-muted)]">
+                          —
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3.5 text-center">
+                      <span
+                        className={`badge ${
+                          loan.status === "CURRENT"
+                            ? "badge-green"
+                            : loan.status === "WATCH"
+                            ? "badge-amber"
+                            : "badge-red"
+                        }`}
+                      >
+                        {loan.status}
+                      </span>
                     </td>
                   </tr>
                 );
               })}
+              {loans.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-4 text-center text-xs text-[var(--color-text-muted)]"
+                  >
+                    No loans recorded
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Two column: Loans + Upcoming Payments */}
+      {/* Two column: FX Rates + Covenant Summary */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Loan Summary */}
+        {/* FX Rates Table */}
         <div className="data-card">
           <div className="data-card-header">
-            <h2 className="text-sm font-semibold">Loan Summary by Maturity</h2>
-            <span className="text-xs text-[var(--color-text-muted)]">ローン一覧（満期順）</span>
-          </div>
-          <div className="divide-y divide-[var(--color-border)]">
-            {loansByMaturity.map((loan) => {
-              const asset = assetsMap[loan.assetId];
-              const monthsToMaturity = Math.ceil(
-                (new Date(loan.maturityDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30)
-              );
-              return (
-                <div key={loan.id} className="px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2">
-                      {asset && <span className="text-base">{countryFlag(asset.country)}</span>}
-                      <div>
-                        <p className="text-xs font-semibold">{loan.lenderName}</p>
-                        {asset && (
-                          <Link href={`/assets/${asset.id}`} className="text-xs text-[var(--color-text-muted)] hover:underline">
-                            {asset.name}
-                          </Link>
-                        )}
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="badge badge-navy">{loan.loanType}</span>
-                          <span className={`badge ${
-                            loan.status === "CURRENT" ? "badge-green" :
-                            loan.status === "WATCH" ? "badge-amber" :
-                            "badge-red"
-                          }`}>{loan.status}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold font-numeric">
-                        {formatMillions(loan.currentBalance, loan.currency)}
-                      </p>
-                      <p className="text-xs text-[var(--color-text-muted)]">
-                        {formatPercent(loan.interestRate * 100, 2)} {loan.rateType === "FIXED" ? "fixed" : `${loan.benchmark ?? ""} +${formatPercent((loan.margin ?? 0) * 100, 2)}`}
-                      </p>
-                      <p className={`text-xs font-semibold mt-0.5 ${
-                        monthsToMaturity <= 12 ? "text-[var(--color-status-red)]" :
-                        monthsToMaturity <= 18 ? "text-[var(--color-status-amber)]" :
-                        "text-[var(--color-text-muted)]"
-                      }`}>
-                        {formatDate(loan.maturityDate, "short")} · {monthsToMaturity}mo
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* LTV / DSCR bars */}
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    <div>
-                      <div className="flex justify-between text-xs mb-0.5">
-                        <span className="text-[var(--color-text-muted)]">LTV</span>
-                        <span className="font-numeric font-medium">{formatPercent(loan.ltv ?? 0)}</span>
-                      </div>
-                      <div className="progress-bar">
-                        <div className="progress-bar-fill" style={{
-                          width: `${Math.min(loan.ltv ?? 0, 100)}%`,
-                          backgroundColor: (loan.ltv ?? 0) <= 55 ? "var(--color-status-green)" :
-                            (loan.ltv ?? 0) <= 65 ? "var(--color-status-amber)" : "var(--color-status-red)",
-                        }} />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-xs mb-0.5">
-                        <span className="text-[var(--color-text-muted)]">DSCR</span>
-                        <span className="font-numeric font-medium">{loan.dscr?.toFixed(2) ?? "—"}x</span>
-                      </div>
-                      <div className="progress-bar">
-                        <div className="progress-bar-fill" style={{
-                          width: `${Math.min(((loan.dscr ?? 0) / 2) * 100, 100)}%`,
-                          backgroundColor: (loan.dscr ?? 0) >= 1.5 ? "var(--color-status-green)" :
-                            (loan.dscr ?? 0) >= 1.2 ? "var(--color-status-amber)" : "var(--color-status-red)",
-                        }} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Upcoming Payments */}
-        <div className="data-card">
-          <div className="data-card-header">
-            <h2 className="text-sm font-semibold">Upcoming Debt Service</h2>
-            <span className="text-xs text-[var(--color-text-muted)]">今後の返済スケジュール</span>
+            <div>
+              <h2 className="text-sm font-semibold">FX Rates</h2>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                為替レート
+              </p>
+            </div>
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {latestFxRates.length} pair{latestFxRates.length !== 1 ? "s" : ""}
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
-                  <th className="text-left px-4 py-2.5">Due Date</th>
-                  <th className="text-left px-3 py-2.5">Lender</th>
-                  <th className="text-left px-3 py-2.5">Type</th>
-                  <th className="text-right px-3 py-2.5">Amount</th>
+                  <th className="text-left px-4 py-2.5">Base</th>
+                  <th className="text-left px-3 py-2.5">Quote</th>
+                  <th className="text-right px-3 py-2.5">Rate</th>
+                  <th className="text-right px-3 py-2.5">Date</th>
+                  <th className="text-right px-3 py-2.5">Source</th>
                 </tr>
               </thead>
               <tbody>
-                {upcomingPayments.map((p, i) => {
-                  const asset = assetsMap[p.assetId];
-                  return (
-                    <tr key={i} className="border-b border-[var(--color-border)] last:border-0 table-row-hover">
-                      <td className="px-4 py-2.5 text-sm font-numeric">
-                        {formatDate(p.date, "medium")}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div>
-                          <p className="text-xs font-medium">{p.lender.split(" ")[0]}</p>
-                          {asset && (
-                            <p className="text-xs text-[var(--color-text-muted)]">{countryFlag(asset.country)} {asset.name}</p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="badge badge-gray">{p.type}</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-numeric">
-                        <span className="text-sm font-medium">
-                          {p.currency} {p.amount.toLocaleString()}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {latestFxRates.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-[var(--color-border)] last:border-0 table-row-hover"
+                  >
+                    <td className="px-4 py-2.5 text-sm font-semibold">
+                      {r.baseCurrency}
+                    </td>
+                    <td className="px-3 py-2.5 text-sm text-[var(--color-text-secondary)]">
+                      {r.quoteCurrency}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-numeric text-sm font-medium">
+                      {Number(r.rate).toFixed(4)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs text-[var(--color-text-muted)]">
+                      {formatDate(r.rateDate, "short")}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs text-[var(--color-text-muted)]">
+                      {r.source}
+                    </td>
+                  </tr>
+                ))}
+                {latestFxRates.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-4 py-3 text-center text-xs text-[var(--color-text-muted)]"
+                    >
+                      No FX rates recorded
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
+
+        {/* Covenant Summary */}
+        <div className="data-card">
+          <div className="data-card-header">
+            <div>
+              <h2 className="text-sm font-semibold">Covenant Summary</h2>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                コベナント概要
+              </p>
+            </div>
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {allCovenants.length} total
+            </span>
+          </div>
+          <div className="divide-y divide-[var(--color-border)]">
+            {loans
+              .filter((l) => l.covenants.length > 0)
+              .map((loan) => {
+                const asset = assetsMap[loan.assetId];
+                return (
+                  <div key={loan.id} className="px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        {asset && (
+                          <span className="text-sm">
+                            {countryFlag(asset.country)}
+                          </span>
+                        )}
+                        <div>
+                          <p className="text-xs font-semibold">
+                            {loan.lenderName}
+                          </p>
+                          {asset && (
+                            <p className="text-xs text-[var(--color-text-muted)]">
+                              {asset.name}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-xs text-[var(--color-text-muted)]">
+                        {loan.covenants.length} covenant
+                        {loan.covenants.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {loan.covenants.map((cov) => (
+                        <div
+                          key={cov.id}
+                          className="flex items-center justify-between text-xs"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[var(--color-text-secondary)] truncate">
+                              {cov.covenantType}
+                            </span>
+                            {cov.currentValue && (
+                              <span className="text-[var(--color-text-muted)] ml-2">
+                                {cov.currentValue} / {cov.threshold}
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            className={`badge ml-2 flex-shrink-0 ${covenantBadgeClass(
+                              cov.status
+                            )}`}
+                          >
+                            {covenantLabel(cov.status)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            {loans.filter((l) => l.covenants.length > 0).length === 0 && (
+              <p className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
+                No covenants recorded
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+function TreasuryLoading() {
+  return (
+    <div className="space-y-5 animate-pulse">
+      <div className="h-10 w-48 bg-[var(--color-slate-50)] rounded" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div
+            key={i}
+            className="data-card p-4 h-24 bg-[var(--color-slate-50)]"
+          />
+        ))}
+      </div>
+      <div className="data-card h-48 bg-[var(--color-slate-50)]" />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {[...Array(2)].map((_, i) => (
+          <div
+            key={i}
+            className="data-card h-48 bg-[var(--color-slate-50)]"
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function TreasuryPage() {
+  return (
+    <Suspense fallback={<TreasuryLoading />}>
+      <TreasuryContent />
+    </Suspense>
   );
 }

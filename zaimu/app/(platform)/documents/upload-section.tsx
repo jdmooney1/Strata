@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Upload, ChevronDown, ChevronUp } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { DocumentUploadForm } from "./upload-form";
 
 interface Props {
@@ -11,6 +12,17 @@ interface Props {
 
 export function DocumentUploadSection({ orgId, assetId }: Props) {
   const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleSuccess() {
+    // Collapse the form
+    setOpen(false);
+    // Use Next.js router.refresh() — re-runs server data fetching without full reload
+    startTransition(() => {
+      router.refresh();
+    });
+  }
 
   return (
     <div className="data-card">
@@ -24,6 +36,11 @@ export function DocumentUploadSection({ orgId, assetId }: Props) {
           <p className="text-xs text-[var(--color-text-muted)] ml-1">
             ドキュメントのアップロード
           </p>
+          {isPending && (
+            <span className="text-xs text-[var(--color-text-muted)] ml-2 animate-pulse">
+              Refreshing…
+            </span>
+          )}
         </div>
         {open ? (
           <ChevronUp className="size-4 text-[var(--color-text-muted)]" />
@@ -37,10 +54,7 @@ export function DocumentUploadSection({ orgId, assetId }: Props) {
           <DocumentUploadForm
             orgId={orgId}
             assetId={assetId}
-            onSuccess={() => {
-              // Refresh the page to show the new document in the register
-              window.location.reload();
-            }}
+            onSuccess={handleSuccess}
           />
         </div>
       )}

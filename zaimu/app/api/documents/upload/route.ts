@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { uploadFile } from "@/lib/storage";
+import { createAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs"; // needed for fs operations
 
@@ -47,6 +48,8 @@ export async function POST(req: NextRequest) {
         notes: JSON.stringify({ storageKey: key }),
       },
     });
+
+    await createAuditLog({ action: "DOCUMENT_UPLOAD", entity: "Document", entityId: doc.id, after: { name: doc.name, docType: doc.docType, orgId } });
 
     return Response.json({ document: doc }, { status: 201 });
   } catch (err) {
