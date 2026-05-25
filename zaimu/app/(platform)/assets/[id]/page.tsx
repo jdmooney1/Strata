@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import {
   ArrowLeft,
   Building2,
@@ -12,22 +13,14 @@ import {
   DollarSign,
   MapPin,
   Calendar,
+  Sparkles,
 } from "lucide-react";
-import {
-  MOCK_ASSETS,
-  MOCK_LOANS,
-  MOCK_LEASES,
-  MOCK_COVENANTS,
-  MOCK_DOCUMENTS,
-  MOCK_ALERTS,
-  MOCK_TASKS,
-} from "@/lib/mock-data";
+import { db } from "@/lib/db";
 import {
   formatMillions,
   formatPercent,
   formatDate,
   covenantBadgeClass,
-  covenantLabel,
   assetTypeLabel,
   assetStatusBadgeClass,
   assetStatusLabel,
@@ -38,6 +31,7 @@ import {
   taskStatusBadgeClass,
   docTypeLabel,
 } from "@/lib/utils";
+import { DocumentUploadSection } from "@/app/(platform)/documents/upload-section";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -45,461 +39,423 @@ interface PageProps {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { id } = await params;
-  const asset = MOCK_ASSETS.find((a) => a.id === id);
+  const asset = await db.asset.findUnique({
+    where: { id },
+    select: { name: true },
+  });
   return { title: asset?.name ?? "Asset" };
 }
 
-export default async function AssetDetailPage({ params }: PageProps) {
-  const { id } = await params;
-  const asset = MOCK_ASSETS.find((a) => a.id === id);
+async function AssetDetailContent({ id }: { id: string }) {
+  const asset = await db.asset.findUnique({
+    where: { id },
+    include: {
+      ownershipEntities: true,
+      loans: {
+        include: { covenants: true },
+        orderBy: { maturityDate: "asc" },
+      },
+      leases: { orderBy: { leaseEnd: "asc" } },
+      capexItems: { where: { status: { notIn: ["COMPLETE", "CANCELLED"] } } },
+      valuations: { orderBy: { valuationDate: "desc" }, take: 3 },
+      documents: {
+        include: { extractedFacts: { select: { id: true, flagged: true } } },
+        orderBy: { uploadedAt: "desc" },
+      },
+      tasks: {
+        where: { status: { notIn: ["COMPLETE", "CANCELLED"] } },
+        orderBy: { dueDate: "asc" },
+      },
+      alerts: { where: { resolved: false }, orderBy: { triggeredAt: "desc" } },
+      pmReports: { orderBy: { reportPeriod: "desc" }, take: 3 },
+    },
+  });
+
   if (!asset) notFound();
 
-  const loans = MOCK_LOANS.filter((l) => l.assetId === asset.id);
-  const leases = MOCK_LEASES.filter((l) => l.assetId === asset.id);
-  const covenants = MOCK_COVENANTS.filter((c) =>
-    loans.some((l) => l.id === c.loanId)
-  );
-  const documents = MOCK_DOCUMENTS.filter((d) => d.assetId === asset.id);
-  const alerts = MOCK_ALERTS.filter(
-    (a) => a.assetId === asset.id && !a.resolved
-  );
-  const tasks = MOCK_TASKS.filter(
-    (t) => t.assetId === asset.id && t.status !== "COMPLETE"
-  );
-
-  const primaryLoan = loans[0];
+  const primaryLoan = asset.loans[0] ?? null;
   const monthsToRefi = asset.refinancingDate
     ? Math.ceil(
-        (new Date(asset.refinancingDate).getTime() - Date.now()) /
+        (asset.refinancingDate.getTime() - Date.now()) /
           (1000 * 60 * 60 * 24 * 30)
       )
     : null;
 
-  const annualRent = leases
+  const annualRent = asset.leases
     .filter((l) => l.status === "ACTIVE")
-    .reduce((sum, l) => {
-      const annual =
-        l.rentFrequency === "MONTHLY_PSF"
-          ? l.baseRent * l.area! * 12
-          : l.rentFrequency === "ANNUAL_PSF"
-          ? l.baseRent * l.area!
-          : l.rentFrequency === "ANNUAL_PSM"
-          ? l.baseRent * l.area!
-          : l.baseRent * 12;
-      return sum + annual;
-    }, 0);
+    .reduce((sum, l) => sum + Number(l.baseRent), 0);
+
+  const totalDebt = asset.loans.reduce(
+    (sum, l) => sum + Number(l.currentBalance),
+    0
+  );
+
+  const allCovenants = asset.loans.flatMap((l) => l.covenants);
+
+  const extractedDocs = asset.documents.filter(
+    (d) => d.status === "EXTRACTED" || d.status === "REVIEWED"
+  ).length;
 
   return (
     <div className="space-y-5">
-      {/* Back nav + header */}
+      {/* Back nav */}
       <div>
         <Link
           href="/assets"
-          className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] mb-3 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
         >
-          <ArrowLeft className="size-3" />
-          Back to Assets
+          <ArrowLeft className="size-3.5" />
+          Assets
         </Link>
+      </div>
 
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <span className="text-3xl">{countryFlag(asset.country)}</span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-semibold">{asset.name}</h1>
-                <span
-                  className={`badge ${assetStatusBadgeClass(asset.status)}`}
-                >
-                  {assetStatusLabel(asset.status)}
-                </span>
-              </div>
+      {/* Asset Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4">
+          <div
+            className="size-12 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
+            style={{ background: "var(--color-navy-100)" }}
+          >
+            {countryFlag(asset.country)}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold">{asset.name}</h1>
+              <span
+                className={`badge ${assetStatusBadgeClass(asset.status)}`}
+              >
+                {assetStatusLabel(asset.status)}
+              </span>
+              <span className="badge badge-gray">
+                {assetTypeLabel(asset.assetType)}
+              </span>
+            </div>
+            {asset.nameJa && (
               <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
                 {asset.nameJa}
               </p>
-              <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] mt-1">
+            )}
+            <div className="flex items-center gap-4 mt-1.5">
+              <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
                 <MapPin className="size-3" />
-                {asset.address ?? `${asset.city}, ${countryName(asset.country)}`}
-              </div>
+                {asset.city}, {countryName(asset.country)}
+              </span>
+              {asset.address && (
+                <span className="text-xs text-[var(--color-text-muted)] hidden sm:block">
+                  {asset.address}
+                </span>
+              )}
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2">
-            {alerts.length > 0 && (
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-status-red)] bg-[var(--color-status-red-bg)] px-3 py-1.5 rounded-md">
-                <AlertTriangle className="size-3.5" />
-                {alerts.length} Active Alert{alerts.length > 1 ? "s" : ""}
-              </div>
-            )}
+        {/* Health Score */}
+        {asset.operationalScore != null && (
+          <div className="text-right flex-shrink-0">
+            <p className="section-label mb-0.5">Health Score</p>
+            <p
+              className={`text-3xl font-bold font-numeric ${scoreClass(
+                asset.operationalScore
+              )}`}
+            >
+              {asset.operationalScore}
+            </p>
           </div>
+        )}
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="data-card p-4">
+          <p className="section-label">Current Valuation</p>
+          <p className="text-xs text-[var(--color-text-muted)]">現在評価額</p>
+          <p className="text-2xl font-semibold font-numeric mt-1">
+            {asset.currentValuation
+              ? `${asset.currency} ${formatMillions(Number(asset.currentValuation))}M`
+              : "—"}
+          </p>
+          {asset.lastValuationDate && (
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+              as at {formatDate(asset.lastValuationDate.toISOString(), "short")}
+            </p>
+          )}
+        </div>
+
+        <div className="data-card p-4">
+          <p className="section-label">Total Debt</p>
+          <p className="text-xs text-[var(--color-text-muted)]">総負債額</p>
+          <p className="text-2xl font-semibold font-numeric mt-1">
+            {totalDebt > 0
+              ? `${asset.currency} ${formatMillions(totalDebt)}M`
+              : "Unlevered"}
+          </p>
+          {primaryLoan?.ltv != null && (
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+              LTV {formatPercent(Number(primaryLoan.ltv) / 100)}
+            </p>
+          )}
+        </div>
+
+        <div className="data-card p-4">
+          <p className="section-label">Occupancy</p>
+          <p className="text-xs text-[var(--color-text-muted)]">稼働率</p>
+          <p className="text-2xl font-semibold font-numeric mt-1">
+            {asset.occupancyRate != null
+              ? formatPercent(Number(asset.occupancyRate) / 100)
+              : "—"}
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+            {asset.totalArea != null ? Number(asset.totalArea).toLocaleString() : "—"} {asset.areaUnit}
+          </p>
+        </div>
+
+        <div className="data-card p-4">
+          <p className="section-label">Annual Rent</p>
+          <p className="text-xs text-[var(--color-text-muted)]">年間賃料</p>
+          <p className="text-2xl font-semibold font-numeric mt-1">
+            {annualRent > 0
+              ? `${asset.currency} ${formatMillions(annualRent)}M`
+              : "—"}
+          </p>
+          {monthsToRefi != null && monthsToRefi > 0 && (
+            <p
+              className={`text-xs mt-0.5 font-medium ${
+                monthsToRefi <= 6
+                  ? "text-[var(--color-status-red)]"
+                  : monthsToRefi <= 12
+                  ? "text-[var(--color-status-amber)]"
+                  : "text-[var(--color-text-muted)]"
+              }`}
+            >
+              Refi in {monthsToRefi}mo
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Alert banners */}
-      {alerts.map((alert) => (
-        <div
-          key={alert.id}
-          className={`rounded-md px-4 py-3 flex items-start gap-3 ${
-            alert.severity === "CRITICAL"
-              ? "alert-critical"
-              : "alert-high"
-          }`}
-        >
-          <AlertTriangle className="size-4 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="font-semibold text-sm">{alert.title}</p>
-            <p className="text-xs mt-0.5 opacity-80">{alert.message}</p>
-          </div>
-        </div>
-      ))}
-
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <KpiCard
-          label="Current Valuation"
-          labelJa="現在評価額"
-          value={formatMillions(asset.currentValuation ?? 0, asset.currency)}
-          sub={`As of ${formatDate(asset.lastValuationDate, "short")}`}
-        />
-        <KpiCard
-          label="Annual Passing Rent"
-          labelJa="年間賃料収入"
-          value={formatMillions(annualRent, asset.currency)}
-          sub={`${leases.filter((l) => l.status === "ACTIVE").length} active leases`}
-        />
-        <KpiCard
-          label="Occupancy"
-          labelJa="稼働率"
-          value={formatPercent(asset.occupancyRate ?? 0)}
-          sub={`${asset.totalArea?.toLocaleString()} ${asset.areaUnit}`}
-          highlight={
-            (asset.occupancyRate ?? 0) < 80 ? "warning" : "normal"
-          }
-        />
-        <KpiCard
-          label="Senior Debt"
-          labelJa="シニアローン"
-          value={
-            primaryLoan
-              ? formatMillions(primaryLoan.currentBalance, primaryLoan.currency)
-              : "—"
-          }
-          sub={primaryLoan ? `LTV ${formatPercent(primaryLoan.ltv ?? 0)}` : ""}
-        />
-        <KpiCard
-          label="Covenant Status"
-          labelJa="コベナンツ状況"
-          value={covenantLabel(asset.covenantStatus)}
-          sub={`${covenants.filter((c) => c.status === "BREACH").length} breach · ${covenants.filter((c) => c.status === "WATCH").length} watch`}
-          highlight={
-            asset.covenantStatus === "BREACH"
-              ? "danger"
-              : asset.covenantStatus === "WATCH"
-              ? "warning"
-              : "normal"
-          }
-        />
-      </div>
-
-      {/* Two-column content */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* Left: Debt Stack + Covenants */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Debt Stack */}
-          <div className="data-card">
-            <div className="data-card-header">
-              <div className="flex items-center gap-2">
-                <DollarSign className="size-4 text-[var(--color-navy-500)]" />
-                <h2 className="text-sm font-semibold">Debt Stack</h2>
+      {/* Alerts */}
+      {asset.alerts.length > 0 && (
+        <div className="space-y-2">
+          {asset.alerts.map((alert) => (
+            <div
+              key={alert.id}
+              className={`alert-${alert.severity.toLowerCase()} flex items-start gap-3`}
+            >
+              <AlertTriangle className="size-4 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold">{alert.title}</p>
+                <p className="text-xs mt-0.5 opacity-80">{alert.message}</p>
               </div>
-              <span className="text-xs text-[var(--color-text-muted)]">
-                負債構成
+              <span className="badge badge-gray text-xs flex-shrink-0">
+                {alert.alertType.replace(/_/g, " ")}
               </span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
-                    <th className="text-left px-4 py-2.5">Lender</th>
-                    <th className="text-left px-3 py-2.5">Type</th>
-                    <th className="text-right px-3 py-2.5">Balance</th>
-                    <th className="text-right px-3 py-2.5">Rate</th>
-                    <th className="text-right px-3 py-2.5">LTV</th>
-                    <th className="text-right px-3 py-2.5">DSCR</th>
-                    <th className="text-right px-3 py-2.5">Maturity</th>
-                    <th className="text-center px-3 py-2.5">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loans.map((loan) => (
-                    <tr
-                      key={loan.id}
-                      className="border-b border-[var(--color-border)] last:border-0"
-                    >
-                      <td className="px-4 py-3">
-                        <p className="text-sm font-medium">{loan.lenderName}</p>
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          {loan.currency}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className="badge badge-navy text-xs">
-                          {loan.loanType}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric">
-                        <p className="text-sm font-semibold">
-                          {formatMillions(loan.currentBalance, loan.currency)}
-                        </p>
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          orig.{" "}
-                          {formatMillions(
-                            loan.originalBalance,
-                            loan.currency
-                          )}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric text-sm">
-                        {formatPercent(loan.interestRate * 100, 2)}
-                        {loan.rateType !== "FIXED" && (
-                          <span className="text-xs text-[var(--color-text-muted)] block">
-                            {loan.benchmark} +{" "}
-                            {formatPercent((loan.margin ?? 0) * 100, 2)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric">
-                        <span
-                          className={`text-sm font-medium ${
-                            (loan.ltv ?? 0) <= 55
-                              ? "text-[var(--color-status-green)]"
-                              : (loan.ltv ?? 0) <= 65
-                              ? "text-[var(--color-status-amber)]"
-                              : "text-[var(--color-status-red)]"
-                          }`}
-                        >
-                          {loan.ltv ? formatPercent(loan.ltv) : "—"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric">
-                        <span
-                          className={`text-sm font-medium ${
-                            (loan.dscr ?? 0) >= 1.5
-                              ? "text-[var(--color-status-green)]"
-                              : (loan.dscr ?? 0) >= 1.2
-                              ? "text-[var(--color-status-amber)]"
-                              : "text-[var(--color-status-red)]"
-                          }`}
-                        >
-                          {loan.dscr?.toFixed(2) ?? "—"}x
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right font-numeric">
-                        <p className="text-sm">
-                          {formatDate(loan.maturityDate, "short")}
-                        </p>
-                        {monthsToRefi !== null && (
-                          <p
-                            className={`text-xs ${
-                              monthsToRefi <= 12
-                                ? "text-[var(--color-status-red)]"
-                                : monthsToRefi <= 18
-                                ? "text-[var(--color-status-amber)]"
-                                : "text-[var(--color-text-muted)]"
-                            }`}
-                          >
-                            {monthsToRefi}mo
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <span
-                          className={`badge ${
-                            loan.status === "CURRENT"
-                              ? "badge-green"
-                              : loan.status === "WATCH"
-                              ? "badge-amber"
-                              : "badge-red"
-                          }`}
-                        >
-                          {loan.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          ))}
+        </div>
+      )}
 
-          {/* Covenant Table */}
-          {covenants.length > 0 && (
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Left column — Debt & Covenants, Leases */}
+        <div className="lg:col-span-2 space-y-5">
+          {/* Debt & Covenants */}
+          {asset.loans.length > 0 && (
             <div className="data-card">
               <div className="data-card-header">
-                <h2 className="text-sm font-semibold">Loan Covenants</h2>
-                <span className="text-xs text-[var(--color-text-muted)]">
-                  コベナンツ
+                <div className="flex items-center gap-2">
+                  <DollarSign className="size-4 text-[var(--color-navy-500)]" />
+                  <h2 className="text-sm font-semibold">Debt & Covenants</h2>
+                </div>
+                <span className="badge badge-gray">
+                  {asset.loans.length} facilit
+                  {asset.loans.length === 1 ? "y" : "ies"}
                 </span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
-                      <th className="text-left px-4 py-2.5">Covenant</th>
-                      <th className="text-right px-3 py-2.5">Threshold</th>
-                      <th className="text-right px-3 py-2.5">Current</th>
-                      <th className="text-left px-3 py-2.5">Frequency</th>
-                      <th className="text-right px-3 py-2.5">Next Test</th>
-                      <th className="text-center px-3 py-2.5">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {covenants.map((cov, i) => (
-                      <tr
-                        key={i}
-                        className={`border-b border-[var(--color-border)] last:border-0 ${
-                          cov.status === "BREACH"
-                            ? "bg-[var(--color-status-red-bg)]"
-                            : ""
-                        }`}
-                      >
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-medium">
-                            {cov.description}
-                          </p>
-                          <p className="text-xs text-[var(--color-text-muted)]">
-                            {cov.covenantType}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3 text-right font-numeric text-sm">
-                          {cov.threshold}
-                        </td>
-                        <td className="px-3 py-3 text-right font-numeric">
-                          <span
-                            className={`text-sm font-semibold ${
-                              cov.status === "COMPLIANT"
-                                ? "text-[var(--color-status-green)]"
-                                : cov.status === "WATCH"
-                                ? "text-[var(--color-status-amber)]"
-                                : "text-[var(--color-status-red)]"
-                            }`}
+              <div className="data-card-body space-y-4">
+                {asset.loans.map((loan) => (
+                  <div key={loan.id} className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {loan.lenderName}
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {loan.loanType} ·{" "}
+                          {(Number(loan.interestRate) * 100).toFixed(2)}%{" "}
+                          {loan.rateType}
+                          {loan.benchmark ? ` + ${loan.benchmark}` : ""}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold font-numeric">
+                          {loan.currency}{" "}
+                          {formatMillions(Number(loan.currentBalance))}M
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          matures{" "}
+                          {formatDate(loan.maturityDate.toISOString(), "short")}
+                        </p>
+                      </div>
+                    </div>
+
+                    {loan.covenants.length > 0 && (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {loan.covenants.map((cov) => (
+                          <div
+                            key={cov.id}
+                            className="bg-[var(--color-slate-50)] rounded p-3"
                           >
-                            {cov.currentValue ?? "—"}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3 text-xs text-[var(--color-text-secondary)]">
-                          {cov.testFreq}
-                        </td>
-                        <td className="px-3 py-3 text-right text-xs font-numeric text-[var(--color-text-secondary)]">
-                          {formatDate(cov.nextTestDate, "short")}
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          <span
-                            className={`badge ${covenantBadgeClass(
-                              cov.status
-                            )}`}
-                          >
-                            {covenantLabel(cov.status)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-xs font-medium">
+                                {cov.covenantType}
+                              </p>
+                              <span
+                                className={`badge ${covenantBadgeClass(
+                                  cov.status
+                                )}`}
+                              >
+                                {cov.status}
+                              </span>
+                            </div>
+                            <p className="text-xs text-[var(--color-text-muted)]">
+                              Current:{" "}
+                              <span className="font-semibold text-[var(--color-text-primary)]">
+                                {cov.currentValue ?? "—"}
+                              </span>
+                            </p>
+                            <p className="text-xs text-[var(--color-text-muted)]">
+                              Threshold: {cov.threshold}
+                            </p>
+                            {cov.nextTestDate && (
+                              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                                Next test:{" "}
+                                {formatDate(
+                                  cov.nextTestDate.toISOString(),
+                                  "short"
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Lease Schedule */}
-          <div className="data-card">
-            <div className="data-card-header">
-              <div className="flex items-center gap-2">
-                <Users className="size-4 text-[var(--color-navy-500)]" />
-                <h2 className="text-sm font-semibold">Lease Schedule</h2>
+          {/* Leases */}
+          {asset.leases.length > 0 && (
+            <div className="data-card">
+              <div className="data-card-header">
+                <div className="flex items-center gap-2">
+                  <Users className="size-4 text-[var(--color-navy-500)]" />
+                  <h2 className="text-sm font-semibold">Lease Schedule</h2>
+                </div>
+                <span className="badge badge-gray">
+                  {asset.leases.filter((l) => l.status === "ACTIVE").length}{" "}
+                  active
+                </span>
               </div>
-              <span className="text-xs text-[var(--color-text-muted)]">
-                リーススケジュール
-              </span>
-            </div>
-            {leases.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
-                      <th className="text-left px-4 py-2.5">Tenant</th>
-                      <th className="text-left px-3 py-2.5">Floor / Area</th>
-                      <th className="text-right px-3 py-2.5">Rent</th>
-                      <th className="text-right px-3 py-2.5">Expiry</th>
-                      <th className="text-right px-3 py-2.5">Break</th>
-                      <th className="text-center px-3 py-2.5">Status</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-[var(--color-text-secondary)]">
+                        Tenant
+                      </th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-[var(--color-text-secondary)]">
+                        Area
+                      </th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-[var(--color-text-secondary)]">
+                        Annual Rent
+                      </th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-[var(--color-text-secondary)]">
+                        Expiry
+                      </th>
+                      <th className="text-center px-3 py-2.5 text-xs font-semibold text-[var(--color-text-secondary)]">
+                        Status
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {leases.map((lease) => {
-                      const monthsToExpiry = Math.ceil(
-                        (new Date(lease.leaseEnd).getTime() - Date.now()) /
-                          (1000 * 60 * 60 * 24 * 30)
+                    {asset.leases.map((lease) => {
+                      const rentAnnual =
+                        lease.rentFrequency === "MONTHLY"
+                          ? Number(lease.baseRent) * 12
+                          : Number(lease.baseRent);
+                      const daysToExpiry = Math.ceil(
+                        (lease.leaseEnd.getTime() - Date.now()) /
+                          (1000 * 60 * 60 * 24)
                       );
                       return (
                         <tr
                           key={lease.id}
-                          className={`border-b border-[var(--color-border)] last:border-0 ${
-                            lease.status === "NOTICE_GIVEN"
-                              ? "bg-[var(--color-status-red-bg)]"
-                              : ""
-                          }`}
+                          className="table-row-hover border-b border-[var(--color-border)] last:border-0"
                         >
                           <td className="px-4 py-3">
-                            <p className="text-sm font-medium">
+                            <p className="text-sm font-semibold">
                               {lease.tenantName}
                             </p>
-                          </td>
-                          <td className="px-3 py-3 text-xs text-[var(--color-text-secondary)]">
-                            <p>{lease.floor}</p>
-                            {lease.area && (
-                              <p className="font-numeric">
-                                {lease.area.toLocaleString()} {lease.areaUnit}
+                            {lease.tenantNameJa && (
+                              <p className="text-xs text-[var(--color-text-muted)]">
+                                {lease.tenantNameJa}
+                              </p>
+                            )}
+                            {lease.floor && (
+                              <p className="text-xs text-[var(--color-text-muted)]">
+                                {lease.floor}
                               </p>
                             )}
                           </td>
-                          <td className="px-3 py-3 text-right font-numeric text-sm">
+                          <td className="px-3 py-3 text-right text-xs font-numeric">
+                            {lease.area != null ? Number(lease.area).toLocaleString() : "—"} {lease.areaUnit}
+                          </td>
+                          <td className="px-3 py-3 text-right text-xs font-numeric">
                             {lease.currency}{" "}
-                            {lease.baseRent.toLocaleString()} / {lease.areaUnit}{" "}
-                            p.a.
+                            {rentAnnual > 0
+                              ? formatMillions(rentAnnual) + "M"
+                              : "—"}
                           </td>
                           <td className="px-3 py-3 text-right">
-                            <p className="text-sm font-numeric">
-                              {formatDate(lease.leaseEnd, "short")}
+                            <p className="text-xs font-numeric">
+                              {formatDate(
+                                lease.leaseEnd.toISOString(),
+                                "short"
+                              )}
                             </p>
-                            <p
-                              className={`text-xs ${
-                                monthsToExpiry <= 12
-                                  ? "text-[var(--color-status-red)]"
-                                  : monthsToExpiry <= 18
-                                  ? "text-[var(--color-status-amber)]"
-                                  : "text-[var(--color-text-muted)]"
-                              }`}
-                            >
-                              {monthsToExpiry}mo
-                            </p>
-                          </td>
-                          <td className="px-3 py-3 text-right text-xs font-numeric text-[var(--color-text-secondary)]">
-                            {lease.breakDate
-                              ? formatDate(lease.breakDate, "short")
-                              : "—"}
+                            {daysToExpiry <= 365 && daysToExpiry > 0 && (
+                              <p
+                                className={`text-xs font-semibold ${
+                                  daysToExpiry <= 90
+                                    ? "text-[var(--color-status-red)]"
+                                    : "text-[var(--color-status-amber)]"
+                                }`}
+                              >
+                                {daysToExpiry}d
+                              </p>
+                            )}
+                            {lease.breakDate && (
+                              <p className="text-xs text-[var(--color-status-amber)]">
+                                Break:{" "}
+                                {formatDate(
+                                  lease.breakDate.toISOString(),
+                                  "short"
+                                )}
+                              </p>
+                            )}
                           </td>
                           <td className="px-3 py-3 text-center">
                             <span
                               className={`badge ${
                                 lease.status === "ACTIVE"
                                   ? "badge-green"
-                                  : lease.status === "NOTICE_GIVEN"
-                                  ? "badge-red"
-                                  : lease.status === "RENEWED"
-                                  ? "badge-blue"
-                                  : "badge-gray"
+                                  : lease.status === "EXPIRED"
+                                  ? "badge-gray"
+                                  : "badge-amber"
                               }`}
                             >
-                              {lease.status.replace("_", " ")}
+                              {lease.status}
                             </span>
                           </td>
                         </tr>
@@ -508,150 +464,114 @@ export default async function AssetDetailPage({ params }: PageProps) {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Documents */}
+          <div className="data-card">
+            <div className="data-card-header">
+              <div className="flex items-center gap-2">
+                <FileText className="size-4 text-[var(--color-navy-500)]" />
+                <h2 className="text-sm font-semibold">Documents</h2>
+              </div>
+              <span className="badge badge-gray">
+                {extractedDocs}/{asset.documents.length} extracted
+              </span>
+            </div>
+
+            {asset.documents.length === 0 ? (
+              <div className="data-card-body text-center py-6">
+                <FileText className="size-6 text-[var(--color-text-muted)] mx-auto mb-2" />
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  No documents yet — upload one below
+                </p>
+              </div>
             ) : (
-              <div className="data-card-body text-sm text-[var(--color-text-muted)]">
-                No leases on record.
+              <div className="divide-y divide-[var(--color-border)]">
+                {asset.documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="px-4 py-3 flex items-center gap-3 table-row-hover"
+                  >
+                    <FileText className="size-4 text-[var(--color-navy-400)] flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="badge badge-gray text-xs">
+                          {docTypeLabel(doc.docType)}
+                        </span>
+                        {doc.extractedFacts.length > 0 && (
+                          <span className="text-xs text-[var(--color-text-muted)]">
+                            {doc.extractedFacts.length} facts
+                          </span>
+                        )}
+                        {doc.aiSummary && (
+                          <Sparkles className="size-3 text-[var(--color-navy-400)]" />
+                        )}
+                      </div>
+                    </div>
+                    <span
+                      className={`badge flex-shrink-0 ${
+                        doc.status === "EXTRACTED" || doc.status === "REVIEWED"
+                          ? "badge-green"
+                          : doc.status === "PROCESSING"
+                          ? "badge-blue"
+                          : doc.status === "ERROR"
+                          ? "badge-red"
+                          : "badge-gray"
+                      }`}
+                    >
+                      {doc.status}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
+
+            {/* Upload embedded in asset page */}
+            <div className="border-t border-[var(--color-border)] p-4">
+              <DocumentUploadSection orgId="org_sanyo_001" assetId={id} />
+            </div>
           </div>
         </div>
 
-        {/* Right column */}
-        <div className="space-y-4">
-          {/* Health Scores */}
-          <div className="data-card p-4">
-            <h3 className="text-xs font-semibold mb-3">Asset Health</h3>
-            <div className="space-y-3">
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-[var(--color-text-secondary)]">
-                    Operational Score
-                  </span>
-                  <span className="text-xs font-semibold font-numeric">
-                    {asset.operationalScore ?? "—"}/100
-                  </span>
-                </div>
-                <div className="progress-bar">
-                  <div
-                    className="progress-bar-fill"
-                    style={{
-                      width: `${asset.operationalScore ?? 0}%`,
-                      backgroundColor:
-                        (asset.operationalScore ?? 0) >= 75
-                          ? "var(--color-status-green)"
-                          : (asset.operationalScore ?? 0) >= 50
-                          ? "var(--color-status-amber)"
-                          : "var(--color-status-red)",
-                    }}
-                  />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-[var(--color-text-secondary)]">
-                    Reporting Score
-                  </span>
-                  <span className="text-xs font-semibold font-numeric">
-                    {asset.reportingScore ?? "—"}/100
-                  </span>
-                </div>
-                <div className="progress-bar">
-                  <div
-                    className="progress-bar-fill"
-                    style={{
-                      width: `${asset.reportingScore ?? 0}%`,
-                      backgroundColor:
-                        (asset.reportingScore ?? 0) >= 75
-                          ? "var(--color-status-green)"
-                          : (asset.reportingScore ?? 0) >= 50
-                          ? "var(--color-status-amber)"
-                          : "var(--color-status-red)",
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Asset Details */}
-          <div className="data-card p-4">
-            <h3 className="text-xs font-semibold mb-3">Asset Details</h3>
-            <div className="space-y-2">
-              {[
-                { label: "Type", value: assetTypeLabel(asset.assetType) },
-                { label: "Country", value: countryName(asset.country) },
-                { label: "City", value: asset.city },
-                {
-                  label: "Total Area",
-                  value: `${asset.totalArea?.toLocaleString()} ${asset.areaUnit}`,
-                },
-                {
-                  label: "Acquired",
-                  value: formatDate(asset.acquisitionDate, "medium"),
-                },
-                {
-                  label: "Acq. Cost",
-                  value: asset.acquisitionCost
-                    ? formatMillions(asset.acquisitionCost, asset.currency)
-                    : "—",
-                },
-                {
-                  label: "Last Valued",
-                  value: formatDate(asset.lastValuationDate, "medium"),
-                },
-                {
-                  label: "Currency",
-                  value: asset.currency,
-                },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="flex justify-between gap-2 py-1 border-b border-[var(--color-border)] last:border-0"
-                >
-                  <span className="text-xs text-[var(--color-text-muted)]">
-                    {item.label}
-                  </span>
-                  <span className="text-xs font-medium text-right">
-                    {item.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Open Tasks */}
-          {tasks.length > 0 && (
+        {/* Right column — Ownership, Tasks, Timeline */}
+        <div className="space-y-5">
+          {/* Ownership */}
+          {asset.ownershipEntities.length > 0 && (
             <div className="data-card">
-              <div className="data-card-header py-3">
-                <h3 className="text-xs font-semibold">Open Tasks</h3>
-                <span className="badge badge-gray">{tasks.length}</span>
+              <div className="data-card-header">
+                <div className="flex items-center gap-2">
+                  <Building2 className="size-4 text-[var(--color-navy-500)]" />
+                  <h2 className="text-sm font-semibold">Ownership Structure</h2>
+                </div>
               </div>
-              <div className="divide-y divide-[var(--color-border)]">
-                {tasks.map((task) => (
-                  <div key={task.id} className="px-4 py-2.5">
-                    <div className="flex items-start gap-2">
-                      <span
-                        className={`badge ${priorityBadgeClass(task.priority)} mt-0.5 flex-shrink-0`}
-                      >
-                        {task.priority.charAt(0)}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium leading-tight line-clamp-2">
-                          {task.title}
+              <div className="data-card-body space-y-3">
+                {asset.ownershipEntities.map((entity) => (
+                  <div key={entity.id}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div>
+                        <p className="text-xs font-semibold">
+                          {entity.entityName}
                         </p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="text-xs text-[var(--color-text-muted)]">
-                            {formatDate(task.dueDate, "short")}
-                          </span>
-                          <span
-                            className={`badge ${taskStatusBadgeClass(
-                              task.status
-                            )}`}
-                          >
-                            {task.status.replace("_", " ")}
-                          </span>
-                        </div>
+                        {entity.entityNameJa && (
+                          <p className="text-xs text-[var(--color-text-muted)]">
+                            {entity.entityNameJa}
+                          </p>
+                        )}
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          {entity.entityType} · {entity.jurisdiction}
+                        </p>
                       </div>
+                      <span className="text-sm font-semibold font-numeric">
+                        {formatPercent(Number(entity.ownershipPct) / 100)}
+                      </span>
+                    </div>
+                    <div className="progress-bar">
+                      <div
+                        className="progress-bar-fill"
+                        style={{ width: `${entity.ownershipPct}%` }}
+                      />
                     </div>
                   </div>
                 ))}
@@ -659,37 +579,132 @@ export default async function AssetDetailPage({ params }: PageProps) {
             </div>
           )}
 
-          {/* Documents */}
-          {documents.length > 0 && (
+          {/* Key Dates */}
+          <div className="data-card">
+            <div className="data-card-header">
+              <div className="flex items-center gap-2">
+                <Calendar className="size-4 text-[var(--color-navy-500)]" />
+                <h2 className="text-sm font-semibold">Key Dates</h2>
+              </div>
+            </div>
+            <div className="data-card-body space-y-2">
+              {asset.acquisitionDate && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[var(--color-text-muted)]">
+                    Acquisition
+                  </span>
+                  <span className="font-numeric font-medium">
+                    {formatDate(asset.acquisitionDate.toISOString(), "short")}
+                  </span>
+                </div>
+              )}
+              {asset.lastValuationDate && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[var(--color-text-muted)]">
+                    Last Valuation
+                  </span>
+                  <span className="font-numeric font-medium">
+                    {formatDate(asset.lastValuationDate.toISOString(), "short")}
+                  </span>
+                </div>
+              )}
+              {asset.refinancingDate && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[var(--color-text-muted)]">
+                    Refinancing Due
+                  </span>
+                  <span
+                    className={`font-numeric font-medium ${
+                      monthsToRefi != null && monthsToRefi <= 12
+                        ? "text-[var(--color-status-amber)]"
+                        : ""
+                    }`}
+                  >
+                    {formatDate(asset.refinancingDate.toISOString(), "short")}
+                    {monthsToRefi != null && monthsToRefi > 0 && (
+                      <span className="ml-1 text-[var(--color-text-muted)]">
+                        ({monthsToRefi}mo)
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Open Tasks */}
+          {asset.tasks.length > 0 && (
             <div className="data-card">
-              <div className="data-card-header py-3">
-                <h3 className="text-xs font-semibold">Key Documents</h3>
-                <Link
-                  href="/documents"
-                  className="text-xs text-[var(--color-text-link)] hover:underline"
-                >
-                  All docs
-                </Link>
+              <div className="data-card-header">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="size-4 text-[var(--color-navy-500)]" />
+                  <h2 className="text-sm font-semibold">Open Tasks</h2>
+                </div>
+                <span className="badge badge-gray">{asset.tasks.length}</span>
               </div>
               <div className="divide-y divide-[var(--color-border)]">
-                {documents.map((doc) => (
-                  <div key={doc.id} className="px-4 py-2.5">
+                {asset.tasks.slice(0, 5).map((task) => (
+                  <div key={task.id} className="px-4 py-3">
                     <div className="flex items-start gap-2">
-                      <FileText className="size-3.5 mt-0.5 text-[var(--color-navy-400)] flex-shrink-0" />
+                      <span
+                        className={`badge flex-shrink-0 mt-0.5 ${priorityBadgeClass(
+                          task.priority
+                        )}`}
+                      >
+                        {task.priority}
+                      </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium leading-tight truncate">
-                          {doc.name}
+                        <p className="text-xs font-medium leading-tight">
+                          {task.title}
                         </p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="badge badge-gray">
-                            {docTypeLabel(doc.docType)}
-                          </span>
-                          <span className="text-xs text-[var(--color-text-muted)]">
-                            {formatDate(doc.uploadedAt, "short")}
-                          </span>
-                        </div>
+                        {task.dueDate && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            Due{" "}
+                            {formatDate(task.dueDate.toISOString(), "short")}
+                          </p>
+                        )}
                       </div>
+                      <span
+                        className={`badge flex-shrink-0 ${taskStatusBadgeClass(
+                          task.status
+                        )}`}
+                      >
+                        {task.status}
+                      </span>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Valuations */}
+          {asset.valuations.length > 0 && (
+            <div className="data-card">
+              <div className="data-card-header">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="size-4 text-[var(--color-navy-500)]" />
+                  <h2 className="text-sm font-semibold">Valuations</h2>
+                </div>
+              </div>
+              <div className="data-card-body space-y-2">
+                {asset.valuations.map((val) => (
+                  <div
+                    key={val.id}
+                    className="flex justify-between items-center text-xs"
+                  >
+                    <div>
+                      <p className="font-medium">
+                        {formatDate(val.valuationDate.toISOString(), "short")}
+                      </p>
+                      <p className="text-[var(--color-text-muted)]">
+                        {val.valuer ?? "Independent"}
+                      </p>
+                    </div>
+                    <p className="font-semibold font-numeric">
+                      {val.currency}{" "}
+                      {formatMillions(Number(val.value))}M
+                    </p>
                   </div>
                 ))}
               </div>
@@ -697,72 +712,38 @@ export default async function AssetDetailPage({ params }: PageProps) {
           )}
         </div>
       </div>
-
-      {/* AI Intelligence */}
-      {documents.some((d) => d.aiSummary) && (
-        <div className="ai-insight">
-          <p className="ai-insight-label">AI Document Intelligence</p>
-          <div className="space-y-3">
-            {documents
-              .filter((d) => d.aiSummary)
-              .map((doc) => (
-                <div key={doc.id}>
-                  <p className="text-xs font-semibold text-[var(--color-navy-700)] mb-1">
-                    {doc.name}
-                  </p>
-                  <p className="text-sm text-[var(--color-navy-900)] leading-relaxed">
-                    {doc.aiSummary}
-                  </p>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// ─── KPI Card ─────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label,
-  labelJa,
-  value,
-  sub,
-  highlight = "normal",
-}: {
-  label: string;
-  labelJa: string;
-  value: string;
-  sub?: string;
-  highlight?: "normal" | "warning" | "danger";
-}) {
+function AssetDetailLoading() {
   return (
-    <div
-      className={`data-card p-4 ${
-        highlight === "danger"
-          ? "border-[var(--color-status-red)] bg-[var(--color-status-red-bg)]"
-          : highlight === "warning"
-          ? "border-[var(--color-status-amber)] bg-[var(--color-status-amber-bg)]"
-          : ""
-      }`}
-    >
-      <p className="section-label">{label}</p>
-      <p className="text-xs text-[var(--color-text-muted)] mb-1">{labelJa}</p>
-      <p
-        className={`text-xl font-semibold font-numeric ${
-          highlight === "danger"
-            ? "text-[var(--color-status-red)]"
-            : highlight === "warning"
-            ? "text-[var(--color-status-amber)]"
-            : ""
-        }`}
-      >
-        {value}
-      </p>
-      {sub && (
-        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{sub}</p>
-      )}
+    <div className="space-y-5 animate-pulse">
+      <div className="h-4 bg-[var(--color-slate-100)] rounded w-20" />
+      <div className="flex items-start gap-4">
+        <div className="size-12 rounded-lg bg-[var(--color-slate-100)]" />
+        <div className="space-y-2 flex-1">
+          <div className="h-6 bg-[var(--color-slate-100)] rounded w-64" />
+          <div className="h-4 bg-[var(--color-slate-100)] rounded w-40" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="data-card p-4">
+            <div className="h-3 bg-[var(--color-slate-100)] rounded w-20 mb-2" />
+            <div className="h-7 bg-[var(--color-slate-100)] rounded w-24" />
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+export default async function AssetDetailPage({ params }: PageProps) {
+  const { id } = await params;
+  return (
+    <Suspense fallback={<AssetDetailLoading />}>
+      <AssetDetailContent id={id} />
+    </Suspense>
   );
 }

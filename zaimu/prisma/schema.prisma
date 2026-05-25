@@ -8,7 +8,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ─────────────────────────────────────────────
@@ -140,6 +139,7 @@ model Asset {
   memories          InstitutionalMemory[]
   reportAssets      ReportAsset[]
   cashFlows         CashFlow[]
+  extractedFacts    ExtractedFact[]
 
   @@map("assets")
 }
@@ -484,6 +484,7 @@ model Document {
   org           Organisation   @relation(fields: [orgId], references: [id])
   asset         Asset?         @relation(fields: [assetId], references: [id])
   obligations   DocumentObligation[]
+  extractedFacts ExtractedFact[]
 
   @@map("documents")
 }
@@ -545,6 +546,44 @@ enum ObligationStatus {
   COMPLETE
   OVERDUE
   WAIVED
+}
+
+// ─────────────────────────────────────────────
+// EXTRACTED FACTS (AI document analysis)
+// ─────────────────────────────────────────────
+
+model ExtractedFact {
+  id           String       @id @default(cuid())
+  documentId   String       @map("document_id")
+  assetId      String?      @map("asset_id")
+  category     FactCategory
+  label        String
+  value        String
+  valueJa      String?      @map("value_ja")
+  confidence   Float?       @db.DoublePrecision
+  sourceText   String?      @map("source_text")
+  pageRef      String?      @map("page_ref")
+  flagged      Boolean      @default(false)
+  flagReason   String?      @map("flag_reason")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  asset        Asset?       @relation(fields: [assetId], references: [id])
+
+  @@map("extracted_facts")
+}
+
+enum FactCategory {
+  DATE
+  PARTY
+  AMOUNT
+  LEASE_TERM
+  LOAN_TERM
+  COVENANT
+  OBLIGATION
+  EXPIRY
+  MISSING_INFO
+  OTHER
 }
 
 // ─────────────────────────────────────────────
