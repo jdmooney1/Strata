@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { AlertTriangle, Bell, CheckCircle } from "lucide-react";
-import { MOCK_ALERTS, MOCK_ASSETS } from "@/lib/mock-data";
+import { db } from "@/lib/db";
 import { formatDate, countryFlag } from "@/lib/utils";
+import { ResolveButton } from "./resolve-button";
 
 export const metadata: Metadata = { title: "Alerts" };
+export const dynamic = "force-dynamic";
 
 const ALERT_TYPE_LABELS: Record<string, string> = {
   COVENANT_BREACH:  "Covenant Breach",
@@ -21,19 +24,24 @@ const ALERT_TYPE_LABELS: Record<string, string> = {
   OBLIGATION_DUE:   "Obligation Due",
 };
 
-const SEVERITY_CONFIG: Record<string, { cls: string; dotCls: string; label: string }> = {
-  CRITICAL: { cls: "alert-critical",   dotCls: "status-dot-red",   label: "Critical" },
-  HIGH:     { cls: "alert-high",       dotCls: "status-dot-amber", label: "High" },
-  MEDIUM:   { cls: "alert-medium",     dotCls: "status-dot-blue",  label: "Medium" },
-  LOW:      { cls: "",                  dotCls: "status-dot-gray",  label: "Low" },
-  INFO:     { cls: "",                  dotCls: "status-dot-gray",  label: "Info" },
+const SEVERITY_CONFIG: Record<string, { cls: string; label: string }> = {
+  CRITICAL: { cls: "badge-red",   label: "Critical" },
+  HIGH:     { cls: "badge-amber", label: "High" },
+  MEDIUM:   { cls: "badge-blue",  label: "Medium" },
+  LOW:      { cls: "badge-gray",  label: "Low" },
+  INFO:     { cls: "badge-gray",  label: "Info" },
 };
 
-export default function AlertsPage() {
-  const assetsMap = Object.fromEntries(MOCK_ASSETS.map((a) => [a.id, a]));
-  const active   = MOCK_ALERTS.filter((a) => !a.resolved);
-  const resolved = MOCK_ALERTS.filter((a) => a.resolved);
+async function AlertsContent() {
+  const alerts = await db.alert.findMany({
+    orderBy: [{ resolved: "asc" }, { triggeredAt: "desc" }],
+    include: {
+      asset: { select: { id: true, name: true, country: true } },
+    },
+  });
 
+  const active   = alerts.filter((a) => !a.resolved);
+  const resolved = alerts.filter((a) => a.resolved);
   const critical = active.filter((a) => a.severity === "CRITICAL");
   const high     = active.filter((a) => a.severity === "HIGH");
   const medium   = active.filter((a) => a.severity === "MEDIUM");
@@ -64,10 +72,10 @@ export default function AlertsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "Critical",    labelJa: "緊急",        value: critical.length,  color: critical.length > 0 ? "text-[var(--color-status-red)]" : "" },
-          { label: "High",        labelJa: "高",          value: high.length,      color: high.length > 0 ? "text-[var(--color-status-amber)]" : "" },
-          { label: "Medium",      labelJa: "中",          value: medium.length,    color: "" },
-          { label: "Total Active",labelJa: "アクティブ合計", value: active.length,   color: "" },
+          { label: "Critical",     labelJa: "緊急",          value: critical.length, color: critical.length > 0 ? "text-[var(--color-status-red)]" : "" },
+          { label: "High",         labelJa: "高",            value: high.length,     color: high.length > 0 ? "text-[var(--color-status-amber)]" : "" },
+          { label: "Medium",       labelJa: "中",            value: medium.length,   color: "" },
+          { label: "Total Active", labelJa: "アクティブ合計", value: active.length,   color: "" },
         ].map((s) => (
           <div key={s.label} className="data-card p-4">
             <p className="section-label">{s.label}</p>
@@ -85,10 +93,10 @@ export default function AlertsPage() {
             <div className="data-card p-8 text-center">
               <CheckCircle className="size-8 text-[var(--color-status-green)] mx-auto mb-2" />
               <p className="text-sm font-medium text-[var(--color-text-secondary)]">No active alerts</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">All operational items are clear</p>
             </div>
           ) : (
             active.map((alert) => {
-              const asset = alert.assetId ? assetsMap[alert.assetId] : null;
               const cfg = SEVERITY_CONFIG[alert.severity] ?? SEVERITY_CONFIG.INFO;
 
               return (
@@ -119,26 +127,23 @@ export default function AlertsPage() {
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm font-semibold leading-tight">{alert.title}</p>
-                            <span className={`badge ${
-                              alert.severity === "CRITICAL" ? "badge-red" :
-                              alert.severity === "HIGH" ? "badge-amber" :
-                              "badge-blue"
-                            }`}>
-                              {cfg.label}
-                            </span>
+                            <span className={`badge ${cfg.cls}`}>{cfg.label}</span>
                             <span className="badge badge-gray">
                               {ALERT_TYPE_LABELS[alert.alertType] ?? alert.alertType}
                             </span>
                           </div>
-                          {asset && (
-                            <Link href={`/assets/${asset.id}`} className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)] hover:underline">
-                              <span>{countryFlag(asset.country)}</span>
-                              <span>{asset.name}</span>
+                          {alert.asset && (
+                            <Link
+                              href={`/assets/${alert.asset.id}`}
+                              className="flex items-center gap-1 mt-1 text-xs text-[var(--color-text-muted)] hover:underline"
+                            >
+                              <span>{countryFlag(alert.asset.country)}</span>
+                              <span>{alert.asset.name}</span>
                             </Link>
                           )}
                         </div>
                         <p className="text-xs text-[var(--color-text-muted)] whitespace-nowrap flex-shrink-0">
-                          {formatDate(alert.triggeredAt, "medium")}
+                          {formatDate(alert.triggeredAt.toISOString(), "medium")}
                         </p>
                       </div>
                       <p className="text-sm mt-1.5 leading-relaxed text-[var(--color-text-primary)]">
@@ -150,10 +155,8 @@ export default function AlertsPage() {
                         </p>
                       )}
                     </div>
-                    <div className="flex-shrink-0">
-                      <button className="text-xs font-medium px-2.5 py-1 rounded border border-current opacity-60 hover:opacity-100 transition-opacity">
-                        Resolve
-                      </button>
+                    <div className="flex-shrink-0 pt-0.5">
+                      <ResolveButton alertId={alert.id} />
                     </div>
                   </div>
                 </div>
@@ -173,9 +176,11 @@ export default function AlertsPage() {
                 <CheckCircle className="size-4 text-[var(--color-status-green)] flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{alert.title}</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    Resolved
-                  </p>
+                  {alert.resolvedAt && (
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      Resolved {formatDate(alert.resolvedAt.toISOString(), "medium")}
+                    </p>
+                  )}
                 </div>
                 <span className="badge badge-gray">Resolved</span>
               </div>
@@ -183,6 +188,46 @@ export default function AlertsPage() {
           </div>
         </div>
       )}
+
+      {alerts.length === 0 && (
+        <div className="data-card p-10 text-center">
+          <Bell className="size-8 text-[var(--color-text-muted)] mx-auto mb-3" />
+          <p className="text-sm font-medium text-[var(--color-text-secondary)]">No alerts configured</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+            Alerts are generated automatically from asset data — covenants, lease expiries, loan maturities
+          </p>
+        </div>
+      )}
     </div>
+  );
+}
+
+function AlertsLoading() {
+  return (
+    <div className="space-y-5 animate-pulse">
+      <div className="h-8 bg-[var(--color-slate-100)] rounded w-48" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="data-card p-4">
+            <div className="h-3 bg-[var(--color-slate-100)] rounded w-16 mb-2" />
+            <div className="h-7 bg-[var(--color-slate-100)] rounded w-8" />
+          </div>
+        ))}
+      </div>
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="rounded-lg border border-[var(--color-border)] bg-white p-4">
+          <div className="h-4 bg-[var(--color-slate-100)] rounded w-64 mb-2" />
+          <div className="h-3 bg-[var(--color-slate-100)] rounded w-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function AlertsPage() {
+  return (
+    <Suspense fallback={<AlertsLoading />}>
+      <AlertsContent />
+    </Suspense>
   );
 }
