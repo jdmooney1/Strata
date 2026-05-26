@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { FileBarChart, CheckCircle, Sparkles, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { FileBarChart, CheckCircle, Sparkles, AlertTriangle, ExternalLink } from "lucide-react";
 import { db } from "@/lib/db";
 import { formatDate, formatRelative } from "@/lib/utils";
 import { ReportGenerator } from "./report-generator";
@@ -115,7 +116,13 @@ async function ReportsContent() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <p className="text-sm font-semibold leading-tight">{report.title}</p>
+                          <Link
+                            href={`/reports/${report.id}`}
+                            className="text-sm font-semibold leading-tight hover:text-[var(--color-navy-700)] hover:underline inline-flex items-center gap-1"
+                          >
+                            {report.title}
+                            <ExternalLink className="size-3 opacity-50" />
+                          </Link>
                           {assetNames && (
                             <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{assetNames}</p>
                           )}

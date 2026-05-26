@@ -4,6 +4,7 @@ import { FileText, Sparkles, AlertTriangle, Clock } from "lucide-react";
 import { db } from "@/lib/db";
 import { formatDate, docTypeLabel, countryFlag } from "@/lib/utils";
 import { DocumentUploadSection } from "./upload-section";
+import { ExtractButton } from "./extract-button";
 
 export const metadata: Metadata = { title: "Documents" };
 export const dynamic = "force-dynamic";
@@ -226,21 +227,22 @@ async function DocumentsContent() {
                           <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed line-clamp-2">
                             {doc.aiSummary}
                           </p>
-                        ) : (
+                        ) : doc.status === "PROCESSING" ? (
                           <span className="text-xs text-[var(--color-text-muted)] italic flex items-center gap-1">
-                            {doc.status === "PENDING" ? (
-                              <>
-                                <Clock className="size-3" />
-                                Awaiting extraction
-                              </>
-                            ) : doc.status === "PROCESSING" ? (
-                              <>
-                                <Sparkles className="size-3 animate-pulse" />
-                                Extracting…
-                              </>
-                            ) : (
-                              "No summary"
-                            )}
+                            <Sparkles className="size-3 animate-pulse" />
+                            Extracting…
+                          </span>
+                        ) : doc.status === "PENDING" || doc.status === "ERROR" ? (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-[var(--color-text-muted)] italic flex items-center gap-1">
+                              <Clock className="size-3" />
+                              {doc.status === "ERROR" ? "Extraction failed" : "Awaiting extraction"}
+                            </span>
+                            <ExtractButton docId={doc.id} />
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-muted)] italic">
+                            No summary
                           </span>
                         )}
                       </td>

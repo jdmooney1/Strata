@@ -8,6 +8,7 @@ import {
   TrendingUp,
   AlertTriangle,
   FileText,
+  FileBarChart,
   RefreshCw,
   Users,
   DollarSign,
@@ -32,6 +33,7 @@ import {
   docTypeLabel,
 } from "@/lib/utils";
 import { DocumentUploadSection } from "@/app/(platform)/documents/upload-section";
+import { ExtractButton } from "@/app/(platform)/documents/extract-button";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -68,6 +70,18 @@ async function AssetDetailContent({ id }: { id: string }) {
       },
       alerts: { where: { resolved: false }, orderBy: { triggeredAt: "desc" } },
       pmReports: { orderBy: { reportPeriod: "desc" }, take: 3 },
+      reportAssets: {
+        include: {
+          report: {
+            select: {
+              id: true, title: true, reportType: true, status: true,
+              period: true, generatedAt: true, language: true,
+            },
+          },
+        },
+        orderBy: { report: { createdAt: "desc" } },
+        take: 5,
+      },
     },
   });
 
@@ -542,19 +556,21 @@ async function AssetDetailContent({ id }: { id: string }) {
                         )}
                       </div>
                     </div>
-                    <span
-                      className={`badge flex-shrink-0 ${
-                        doc.status === "EXTRACTED" || doc.status === "REVIEWED"
-                          ? "badge-green"
-                          : doc.status === "PROCESSING"
-                          ? "badge-blue"
-                          : doc.status === "ERROR"
-                          ? "badge-red"
-                          : "badge-gray"
-                      }`}
-                    >
-                      {doc.status}
-                    </span>
+                    {(doc.status === "PENDING" || doc.status === "ERROR") ? (
+                      <ExtractButton docId={doc.id} />
+                    ) : (
+                      <span
+                        className={`badge flex-shrink-0 ${
+                          doc.status === "EXTRACTED" || doc.status === "REVIEWED"
+                            ? "badge-green"
+                            : doc.status === "PROCESSING"
+                            ? "badge-blue"
+                            : "badge-gray"
+                        }`}
+                      >
+                        {doc.status}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -566,6 +582,57 @@ async function AssetDetailContent({ id }: { id: string }) {
             </div>
           </div>
         </div>
+
+        {/* Board Reports for this asset */}
+        {asset.reportAssets.length > 0 && (
+          <div className="data-card">
+            <div className="data-card-header">
+              <div className="flex items-center gap-2">
+                <FileBarChart className="size-4 text-[var(--color-navy-500)]" />
+                <h2 className="text-sm font-semibold">Board Reports</h2>
+              </div>
+              <Link href="/reports" className="text-xs text-[var(--color-text-muted)] hover:underline">
+                All reports →
+              </Link>
+            </div>
+            <div className="divide-y divide-[var(--color-border)]">
+              {asset.reportAssets.map(({ report }) => (
+                <Link
+                  key={report.id}
+                  href={`/reports/${report.id}`}
+                  className="px-4 py-3 flex items-center gap-3 table-row-hover"
+                >
+                  <div
+                    className={`size-2 rounded-full flex-shrink-0 ${
+                      report.status === "PUBLISHED" || report.status === "APPROVED"
+                        ? "bg-[var(--color-status-green)]"
+                        : report.status === "REVIEW"
+                        ? "bg-[var(--color-status-amber)]"
+                        : "bg-[var(--color-slate-300)]"
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{report.title}</p>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                      {formatDate(report.period.toISOString(), "medium")} ·{" "}
+                      {report.language === "ja" ? "日本語" : "English"}
+                    </p>
+                  </div>
+                  <span
+                    className={`badge flex-shrink-0 ${
+                      report.status === "PUBLISHED" ? "badge-green"
+                      : report.status === "APPROVED" ? "badge-navy"
+                      : report.status === "REVIEW"   ? "badge-amber"
+                      : "badge-gray"
+                    }`}
+                  >
+                    {report.status}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Right column — Ownership, Tasks, Timeline */}
         <div className="space-y-5">
