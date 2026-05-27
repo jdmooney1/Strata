@@ -63,6 +63,8 @@ model User {
   memories       InstitutionalMemory[]
   reportApprovals ReportApproval[]
   auditLogs      AuditLog[]
+  ownedWorkflowSteps WorkflowStep[]     @relation("WorkflowStepOwner")
+  approvalDecisions  ApprovalDecision[]
 
   @@map("users")
 }
@@ -142,6 +144,7 @@ model Asset {
   extractedFacts    ExtractedFact[]
   riskEvents        RiskEvent[]
   healthScore       AssetHealthScore?
+  workflows         Workflow[]
 
   @@map("assets")
 }
@@ -987,4 +990,248 @@ model AssetHealthScore {
   asset Asset @relation(fields: [assetId], references: [id])
 
   @@map("asset_health_scores")
+}
+
+// ─────────────────────────────────────────────
+// INSTITUTIONAL WORKFLOW LAYER
+// ─────────────────────────────────────────────
+
+enum WorkflowType {
+  REFINANCING
+  LEASE_RENEWAL
+  VALUATION_UPDATE
+  MONTHLY_REPORTING
+  INSURANCE_RENEWAL
+  COVENANT_REPORTING
+  CAPEX_APPROVAL
+  ACQUISITION_ONBOARDING
+  CUSTOM
+
+  @@map("WorkflowType")
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  BLOCKED
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+
+  @@map("WorkflowStatus")
+}
+
+enum StepStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  PENDING_APPROVAL
+  COMPLETE
+  BLOCKED
+  SKIPPED
+  OVERDUE
+
+  @@map("StepStatus")
+}
+
+enum StepType {
+  ACTION
+  APPROVAL
+  DOCUMENT_UPLOAD
+  MILESTONE
+  EXTERNAL
+
+  @@map("StepType")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ABSTAINED
+
+  @@map("ApprovalStatus")
+}
+
+enum EscalationPath {
+  STANDARD
+  EXPEDITED
+  BOARD
+  EXTERNAL
+
+  @@map("EscalationPath")
+}
+
+/// Reusable workflow template — defines the steps for a business process.
+model WorkflowTemplate {
+  id           String       @id @default(cuid())
+  orgId        String?      @map("org_id")    // null = system-level template
+  code         String       @unique
+  name         String
+  nameJa       String?      @map("name_ja")
+  description  String?
+  workflowType WorkflowType @map("workflow_type")
+  assetTypes   String[]     @map("asset_types")    // AssetType codes this applies to
+  jurisdictions String[]                            // ISO country codes
+  isSystem     Boolean      @default(false)         @map("is_system")
+  isActive     Boolean      @default(true)          @map("is_active")
+  estimatedDays Int?        @map("estimated_days")
+
+  steps     WorkflowTemplateStep[]
+  workflows Workflow[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  @@map("workflow_templates")
+}
+
+/// An ordered step within a workflow template.
+model WorkflowTemplateStep {
+  id               String   @id @default(cuid())
+  templateId       String   @map("template_id")
+  stepOrder        Int      @map("step_order")
+  name             String
+  nameJa           String?  @map("name_ja")
+  description      String?
+  stepType         StepType @map("step_type")
+  dueDaysFromStart Int?     @map("due_days_from_start")   // offset from workflow.startedAt
+  defaultOwnerRole String?  @map("default_owner_role")
+  requiresApproval Boolean  @default(false) @map("requires_approval")
+  approverRoles    String[] @map("approver_roles")
+  dependsOnOrders  Int[]    @map("depends_on_orders")   // stepOrder values this depends on
+  isRequired       Boolean  @default(true) @map("is_required")
+  guidanceNote     String?  @map("guidance_note")
+
+  template WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, stepOrder])
+  @@map("workflow_template_steps")
+}
+
+/// A running workflow instance for a specific asset.
+model Workflow {
+  id           String         @id @default(cuid())
+  orgId        String         @map("org_id")
+  assetId      String         @map("asset_id")
+  templateId   String?        @map("template_id")
+  workflowType WorkflowType   @map("workflow_type")
+  status       WorkflowStatus @default(DRAFT)
+  title        String
+  titleJa      String?        @map("title_ja")
+  description  String?
+
+  linkedRiskEventIds String[] @map("linked_risk_event_ids")
+
+  startedAt   DateTime? @map("started_at")
+  targetDate  DateTime? @map("target_date")
+  completedAt DateTime? @map("completed_at")
+  cancelledAt DateTime? @map("cancelled_at")
+  cancelReason String?  @map("cancel_reason")
+
+  createdById String   @map("created_by_id")
+  notes       String?
+
+  // AI assistance
+  aiSuggestions   String?   @map("ai_suggestions")
+  aiAnalyzedAt    DateTime? @map("ai_analyzed_at")
+
+  asset    Asset             @relation(fields: [assetId], references: [id])
+  template WorkflowTemplate? @relation(fields: [templateId], references: [id])
+  steps    WorkflowStep[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  @@index([orgId, status])
+  @@index([assetId, status])
+  @@map("workflows")
+}
+
+/// A single step (action item) within a running workflow.
+model WorkflowStep {
+  id          String     @id @default(cuid())
+  workflowId  String     @map("workflow_id")
+  stepOrder   Int        @map("step_order")
+  name        String
+  nameJa      String?    @map("name_ja")
+  description String?
+  stepType    StepType   @map("step_type")
+  status      StepStatus @default(NOT_STARTED)
+
+  // Ownership & assignment
+  ownerId    String?  @map("owner_id")
+  assigneeIds String[] @map("assignee_ids")
+
+  // Scheduling
+  dueDate     DateTime? @map("due_date")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  completedBy String?   @map("completed_by")
+  completionNote String? @map("completion_note")
+
+  // Escalation
+  escalationPath EscalationPath @default(STANDARD) @map("escalation_path")
+  escalatedAt    DateTime?      @map("escalated_at")
+  escalatedTo    String?        @map("escalated_to")
+  escalationNote String?        @map("escalation_note")
+
+  // Dependencies & blocks
+  dependsOnStepIds String[] @map("depends_on_step_ids")
+  blockedReason    String?  @map("blocked_reason")
+
+  // Linked data
+  linkedRiskEventId String?  @map("linked_risk_event_id")
+  documentIds       String[] @map("document_ids")
+  guidanceNote      String?  @map("guidance_note")
+  notes             String?
+
+  workflow  Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  owner     User?             @relation("WorkflowStepOwner", fields: [ownerId], references: [id])
+  approvals WorkflowApproval[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  @@index([workflowId, status])
+  @@map("workflow_steps")
+}
+
+/// An approval request tied to a workflow step, with a sequential reviewer chain.
+model WorkflowApproval {
+  id             String         @id @default(cuid())
+  workflowStepId String         @map("workflow_step_id")
+  workflowId     String         @map("workflow_id")
+  title          String
+  description    String?
+  requestedById  String         @map("requested_by_id")
+  requestedAt    DateTime       @default(now()) @map("requested_at")
+  dueDate        DateTime?      @map("due_date")
+  reviewerIds    String[]       @map("reviewer_ids")      // ordered reviewer chain
+  currentIndex   Int            @default(0) @map("current_index")
+  status         ApprovalStatus @default(PENDING)
+  completedAt    DateTime?      @map("completed_at")
+  rejectionNote  String?        @map("rejection_note")
+
+  step      WorkflowStep       @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
+  decisions ApprovalDecision[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  @@map("workflow_approvals")
+}
+
+/// A single reviewer's decision within an approval chain.
+model ApprovalDecision {
+  id         String         @id @default(cuid())
+  approvalId String         @map("approval_id")
+  reviewerId String         @map("reviewer_id")
+  decision   ApprovalStatus
+  decidedAt  DateTime       @default(now()) @map("decided_at")
+  note       String?
+
+  approval WorkflowApproval @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  reviewer User             @relation(fields: [reviewerId], references: [id])
+
+  @@map("approval_decisions")
 }
