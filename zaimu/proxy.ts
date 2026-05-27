@@ -37,7 +37,7 @@ async function getClerkMiddleware() {
 // Cache the clerk handler (created once per worker process)
 let clerkHandler: ((req: NextRequest) => Promise<NextResponse>) | null = null;
 
-export default async function middleware(req: NextRequest): Promise<NextResponse> {
+export default async function proxy(req: NextRequest): Promise<NextResponse> {
   if (isDemoMode) return NextResponse.next();
 
   if (!clerkHandler) {

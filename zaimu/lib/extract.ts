@@ -4,18 +4,23 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 let _client: Anthropic | null = null;
+let _clientKey: string | null = null; // track which credential the client was built with
+
 function getAnthropicClient(): Anthropic {
-  if (!_client) {
-    const apiKey   = process.env.ANTHROPIC_API_KEY;
-    const authToken = process.env.ANTHROPIC_AUTH_TOKEN; // Bearer OAuth token
+  const apiKey    = process.env.ANTHROPIC_API_KEY;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN; // Bearer OAuth token
+  const currentKey = apiKey ?? authToken ?? null;
 
-    if (!apiKey && !authToken) {
-      throw new Error("ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not configured.");
-    }
+  if (!currentKey) {
+    throw new Error("ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not configured.");
+  }
 
+  // Re-create client if credential has changed (e.g. token refresh)
+  if (!_client || _clientKey !== currentKey) {
     _client = apiKey
       ? new Anthropic({ apiKey })
       : new Anthropic({ authToken, apiKey: null });
+    _clientKey = currentKey;
   }
   return _client;
 }
