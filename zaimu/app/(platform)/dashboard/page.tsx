@@ -6,6 +6,8 @@ import {
   CheckSquare,
   ArrowRight,
   RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import {
@@ -27,7 +29,7 @@ export const dynamic = "force-dynamic";
 const ORG_ID = "org_sanyo_001";
 
 async function DashboardContent() {
-  const [assets, allLoans, alerts, tasks, fxRates] = await Promise.all([
+  const [assets, allLoans, alerts, tasks, fxRates, riskEvents] = await Promise.all([
     db.asset.findMany({
       where: { orgId: ORG_ID },
       include: { loans: { include: { covenants: true } } },
@@ -47,6 +49,16 @@ async function DashboardContent() {
       where: { orgId: ORG_ID },
       orderBy: { rateDate: "desc" },
       take: 20,
+    }),
+    db.riskEvent.findMany({
+      where: {
+        orgId: ORG_ID,
+        severity: { in: ["CRITICAL", "ESCALATED"] },
+        status: { in: ["OPEN", "ACKNOWLEDGED", "ESCALATED"] },
+      },
+      include: { asset: { select: { id: true, name: true } } },
+      orderBy: { firstDetectedAt: "desc" },
+      take: 3,
     }),
   ]);
 
@@ -261,6 +273,58 @@ async function DashboardContent() {
 
         {/* Right column */}
         <div className="space-y-4">
+          {/* Risk Alerts */}
+          <div className="data-card">
+            <div className="data-card-header">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="size-4 text-[var(--color-navy-600)]" />
+                <h2 className="text-sm font-semibold">Risk Alerts</h2>
+              </div>
+              <Link
+                href="/risk"
+                className="text-xs text-[var(--color-text-link)] hover:underline"
+              >
+                View all →
+              </Link>
+            </div>
+            {riskEvents.length === 0 ? (
+              <div className="px-4 py-4 flex items-center gap-2">
+                <ShieldCheck className="size-4 text-[var(--color-status-green)]" />
+                <p className="text-xs text-[var(--color-text-muted)]">All clear — no critical risk events</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--color-border)]">
+                {riskEvents.map((risk) => (
+                  <div key={risk.id} className="px-4 py-2.5 flex items-start gap-2.5">
+                    <span
+                      className={`badge flex-shrink-0 mt-0.5 ${
+                        risk.severity === "ESCALATED" ? "badge-red" : "badge-red"
+                      }`}
+                    >
+                      {risk.severity === "ESCALATED" ? "ESC" : "CRIT"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold leading-tight text-[var(--color-text-primary)] truncate">
+                        {risk.title}
+                      </p>
+                      {risk.asset && (
+                        <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">
+                          {risk.asset.name}
+                        </p>
+                      )}
+                    </div>
+                    <Link
+                      href={`/risk/${risk.id}`}
+                      className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-navy-600)] flex-shrink-0"
+                    >
+                      View →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Active Alerts */}
           <div className="data-card">
             <div className="data-card-header">

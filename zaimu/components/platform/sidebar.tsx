@@ -11,6 +11,7 @@ import {
   FileText,
   CheckSquare,
   Bell,
+  ShieldAlert,
   DollarSign,
   FileBarChart,
   Archive,
@@ -48,6 +49,7 @@ const navSections: NavSection[] = [
       { href: '/documents',  label: 'Documents',           Icon: FileText },
       { href: '/tasks',      label: 'Tasks',               Icon: CheckSquare },
       { href: '/alerts',     label: 'Alerts',              Icon: Bell },
+      { href: '/risk',       label: 'Risk Engine',         Icon: ShieldAlert },
     ],
   },
   {

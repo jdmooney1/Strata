@@ -15,6 +15,7 @@ import {
   MapPin,
   Calendar,
   Sparkles,
+  ShieldAlert,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import {
@@ -34,6 +35,7 @@ import {
 } from "@/lib/utils";
 import { DocumentUploadSection } from "@/app/(platform)/documents/upload-section";
 import { ExtractButton } from "@/app/(platform)/documents/extract-button";
+import { RunEvaluationButton } from "@/app/(platform)/risk/run-evaluation-button";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -49,7 +51,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 async function AssetDetailContent({ id }: { id: string }) {
-  const asset = await db.asset.findUnique({
+  const [asset, healthScore, openRiskCount] = await Promise.all([
+  db.asset.findUnique({
     where: { id },
     include: {
       ownershipEntities: true,
@@ -83,7 +86,15 @@ async function AssetDetailContent({ id }: { id: string }) {
         take: 5,
       },
     },
-  });
+  }),
+  db.assetHealthScore.findUnique({ where: { assetId: id } }),
+  db.riskEvent.count({
+    where: {
+      assetId: id,
+      status: { in: ["OPEN", "ACKNOWLEDGED", "ESCALATED"] },
+    },
+  }),
+  ]);
 
   if (!asset) notFound();
 
@@ -633,6 +644,121 @@ async function AssetDetailContent({ id }: { id: string }) {
             </div>
           </div>
         )}
+
+        {/* Operational Health */}
+        <div className="data-card">
+          <div className="data-card-header">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="size-4 text-[var(--color-navy-500)]" />
+              <h2 className="text-sm font-semibold">Operational Health</h2>
+            </div>
+            <RunEvaluationButton orgId={asset.orgId} assetId={id} variant="asset" />
+          </div>
+          {healthScore ? (
+            <div className="data-card-body space-y-4">
+              {/* Overall score */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-[var(--color-text-muted)] mb-0.5">Overall Score</p>
+                  <p
+                    className={`text-3xl font-bold font-numeric ${
+                      healthScore.overallScore >= 80
+                        ? "text-green-600"
+                        : healthScore.overallScore >= 60
+                        ? "text-amber-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {Math.round(healthScore.overallScore)}
+                    <span className="text-base font-normal text-[var(--color-text-muted)]"> / 100</span>
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    Scored {formatDate(healthScore.scoredAt, "medium")}
+                  </p>
+                </div>
+                {openRiskCount > 0 && (
+                  <Link
+                    href={`/risk?assetId=${id}`}
+                    className="text-right"
+                  >
+                    <p
+                      className={`text-2xl font-bold font-numeric ${
+                        (healthScore.openCritical + healthScore.openEscalated) > 0
+                          ? "text-red-600"
+                          : healthScore.openWarnings > 0
+                          ? "text-amber-600"
+                          : "text-[var(--color-text-primary)]"
+                      }`}
+                    >
+                      {openRiskCount}
+                    </p>
+                    <p className="text-xs text-[var(--color-text-muted)]">open issues →</p>
+                  </Link>
+                )}
+              </div>
+
+              {/* Category bars */}
+              <div className="space-y-2.5">
+                {[
+                  { label: "Lease", score: healthScore.leaseScore },
+                  { label: "Debt", score: healthScore.debtScore },
+                  { label: "Reporting", score: healthScore.reportingScore },
+                  { label: "Compliance", score: healthScore.complianceScore },
+                  { label: "Treasury", score: healthScore.treasuryScore },
+                ].map(({ label, score }) => (
+                  <div key={label}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-[var(--color-text-secondary)]">{label}</span>
+                      <span
+                        className={`text-xs font-numeric font-semibold ${
+                          score >= 80
+                            ? "text-green-600"
+                            : score >= 60
+                            ? "text-amber-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {Math.round(score)}
+                      </span>
+                    </div>
+                    <div
+                      className="rounded-full overflow-hidden"
+                      style={{ height: "5px", background: "var(--color-slate-100)" }}
+                    >
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${score}%`,
+                          background:
+                            score >= 80
+                              ? "var(--color-status-green)"
+                              : score >= 60
+                              ? "var(--color-status-amber)"
+                              : "var(--color-status-red)",
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="data-card-body text-center py-6">
+              <ShieldAlert className="size-6 text-[var(--color-text-muted)] mx-auto mb-2" />
+              <p className="text-xs text-[var(--color-text-muted)] mb-3">
+                No health score yet. Run a risk scan to generate one.
+              </p>
+              {openRiskCount > 0 && (
+                <Link
+                  href={`/risk?assetId=${id}`}
+                  className="text-xs text-[var(--color-navy-600)] hover:underline"
+                >
+                  {openRiskCount} open issue{openRiskCount !== 1 ? "s" : ""} →
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Right column — Ownership, Tasks, Timeline */}
         <div className="space-y-5">
