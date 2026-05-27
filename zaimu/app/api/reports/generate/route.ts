@@ -175,15 +175,18 @@ export async function POST(req: NextRequest) {
       })),
     };
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    const apiKey    = process.env.ANTHROPIC_API_KEY;
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    if (!apiKey && !authToken) {
       return Response.json(
-        { error: "ANTHROPIC_API_KEY is not configured" },
+        { error: "ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not configured" },
         { status: 503 }
       );
     }
 
-    const client = new Anthropic({ apiKey });
+    const client = apiKey
+      ? new Anthropic({ apiKey })
+      : new Anthropic({ authToken, apiKey: null });
 
     const userPrompt = `Generate a ${reportType} board report for ${asset.name} for period ${period}.
 
@@ -223,15 +226,17 @@ Language: ${language === "ja" ? "Write all content in formal Japanese (書き言
     const responseText =
       message.content[0].type === "text" ? message.content[0].text : "";
 
-    // Strip any accidental markdown fences
-    const jsonMatch =
-      responseText.match(/```(?:json)?\s*([\s\S]*?)```/) ?? [
-        null,
-        responseText,
-      ];
-    const reportContent = JSON.parse(
-      (jsonMatch[1] ?? responseText).trim()
-    ) as Record<string, unknown>;
+    // Strip markdown fences — greedy match from first ``` to last ```
+    let reportJson: string;
+    const fenceMatch = responseText.match(/```(?:json)?\s*([\s\S]+)\s*```/);
+    if (fenceMatch) {
+      reportJson = fenceMatch[1].trim();
+    } else {
+      const s = responseText.indexOf("{");
+      const e = responseText.lastIndexOf("}");
+      reportJson = s !== -1 && e > s ? responseText.slice(s, e + 1) : responseText;
+    }
+    const reportContent = JSON.parse(reportJson) as Record<string, unknown>;
 
     // Save report to DB
     const report = await db.report.create({

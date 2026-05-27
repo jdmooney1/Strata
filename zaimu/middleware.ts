@@ -41,7 +41,7 @@ export default async function middleware(req: NextRequest): Promise<NextResponse
   if (isDemoMode) return NextResponse.next();
 
   if (!clerkHandler) {
-    clerkHandler = await getClerkMiddleware() as typeof clerkHandler;
+    clerkHandler = await getClerkMiddleware() as unknown as typeof clerkHandler;
   }
   return clerkHandler!(req) as unknown as NextResponse;
 }

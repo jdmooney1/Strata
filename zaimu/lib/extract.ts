@@ -6,9 +6,16 @@ import Anthropic from "@anthropic-ai/sdk";
 let _client: Anthropic | null = null;
 function getAnthropicClient(): Anthropic {
   if (!_client) {
-    const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) throw new Error("ANTHROPIC_API_KEY is not configured.");
-    _client = new Anthropic({ apiKey: key });
+    const apiKey   = process.env.ANTHROPIC_API_KEY;
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN; // Bearer OAuth token
+
+    if (!apiKey && !authToken) {
+      throw new Error("ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is not configured.");
+    }
+
+    _client = apiKey
+      ? new Anthropic({ apiKey })
+      : new Anthropic({ authToken, apiKey: null });
   }
   return _client;
 }
@@ -62,11 +69,11 @@ Extract all material facts from this document. Return a JSON object with this ex
       "label": "Human-readable label (e.g. 'Lease Commencement Date')",
       "value": "The extracted value as a string",
       "valueJa": "Japanese translation of value (optional)",
-      "confidence": 0.0-1.0,
-      "sourceText": "The exact text excerpt this was taken from (max 200 chars)",
-      "pageRef": "Page or section reference if identifiable",
+      "confidence": 0.0,
+      "sourceText": "Brief quote max 80 chars",
+      "pageRef": "Section reference if identifiable",
       "flagged": false,
-      "flagReason": "Why flagged, if applicable"
+      "flagReason": ""
     }
   ],
   "aiSummary": "2-4 sentence institutional English summary of this document's key content",
@@ -85,7 +92,7 @@ export async function extractFromText(
 
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 4096,
+    max_tokens: 16000,
     system: EXTRACTION_SYSTEM_PROMPT,
     messages: [
       {
@@ -98,12 +105,72 @@ export async function extractFromText(
   const content = response.content[0];
   if (content.type !== "text") throw new Error("Unexpected response type");
 
-  // Parse JSON from response — handle markdown code blocks
-  const jsonMatch = content.text.match(/```(?:json)?\s*([\s\S]*?)```/) ||
-                    [null, content.text];
-  const jsonStr = jsonMatch[1].trim();
+  // Parse JSON from response — robustly handle markdown code fences
+  const raw = content.text;
+  let jsonStr: string;
 
-  const parsed = JSON.parse(jsonStr) as ExtractionResult;
+  // 1. Greedy match: everything between the first ``` and last ```
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]+)\s*```/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1].trim();
+  } else {
+    // 2. Extract by finding the first { to the last }
+    const start = raw.indexOf("{");
+    const end   = raw.lastIndexOf("}");
+    jsonStr = start !== -1 && end > start ? raw.slice(start, end + 1) : raw;
+  }
+
+  // Attempt strict parse first, then try partial recovery if truncated
+  let parsed: ExtractionResult;
+  try {
+    parsed = JSON.parse(jsonStr) as ExtractionResult;
+  } catch {
+    // JSON may be truncated — try to salvage the facts array
+    const factsMatch = jsonStr.match(/"facts"\s*:\s*(\[[\s\S]*)/);
+    if (factsMatch) {
+      let arr = factsMatch[1];
+
+      // Strategy: truncation may happen inside a string value, so lastIndexOf("}")
+      // may land inside a broken string. Instead, find the last *complete* object
+      // boundary: the last occurrence of "}," (object end + comma before next item).
+      // Then close the array after that last complete object.
+      const lastCompleteObj = arr.lastIndexOf("},");
+      if (lastCompleteObj !== -1) {
+        arr = arr.slice(0, lastCompleteObj + 1) + "]";
+      } else {
+        // Only one object or no comma separators — fall back to last "}"
+        const lastClose = arr.lastIndexOf("}");
+        if (lastClose !== -1) arr = arr.slice(0, lastClose + 1) + "]";
+      }
+
+      // Iteratively strip last item until the array is valid JSON
+      let facts: ExtractedFactData[] | null = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          facts = JSON.parse(arr) as ExtractedFactData[];
+          break;
+        } catch {
+          // Remove the last element boundary and retry
+          const cut = arr.lastIndexOf("},");
+          if (cut === -1) break;
+          arr = arr.slice(0, cut + 1) + "]";
+        }
+      }
+
+      if (facts !== null) {
+        // Try to salvage summary / metadata fields from the raw JSON too
+        const summaryMatch = jsonStr.match(/"aiSummary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        const summaryJaMatch = jsonStr.match(/"aiSummaryJa"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        const aiSummary = summaryMatch ? summaryMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"') : "";
+        const aiSummaryJa = summaryJaMatch ? summaryJaMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"') : "";
+        parsed = { facts, aiSummary, aiSummaryJa, missingInfo: [], riskFlags: [] };
+      } else {
+        throw new Error(`Could not parse extraction response: ${jsonStr.slice(0, 200)}`);
+      }
+    } else {
+      throw new Error(`Could not parse extraction response: ${jsonStr.slice(0, 200)}`);
+    }
+  }
   return parsed;
 }
 
