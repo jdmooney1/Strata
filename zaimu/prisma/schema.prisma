@@ -140,6 +140,8 @@ model Asset {
   reportAssets      ReportAsset[]
   cashFlows         CashFlow[]
   extractedFacts    ExtractedFact[]
+  riskEvents        RiskEvent[]
+  healthScore       AssetHealthScore?
 
   @@map("assets")
 }
@@ -822,4 +824,167 @@ model AuditLog {
   user      User     @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────
+// OPERATIONAL RISK ENGINE
+// ─────────────────────────────────────────────
+
+enum RiskCategory {
+  LEASE
+  DEBT
+  REPORTING
+  COMPLIANCE
+  TREASURY
+
+  @@map("RiskCategory")
+}
+
+enum RiskSeverity {
+  INFORMATIONAL
+  WARNING
+  CRITICAL
+  ESCALATED
+
+  @@map("RiskSeverity")
+}
+
+enum RiskStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  SUPPRESSED
+  ESCALATED
+
+  @@map("RiskStatus")
+}
+
+enum EscalationLevel {
+  NONE
+  ANALYST
+  SENIOR_ANALYST
+  FUND_MANAGER
+  BOARD
+
+  @@map("EscalationLevel")
+}
+
+/// Definition of a monitoring rule — evaluated on every risk engine run.
+model RiskRule {
+  id              String       @id @default(cuid())
+  code            String       @unique            // e.g. "LEASE_EXPIRY_30D"
+  name            String
+  nameJa          String?      @map("name_ja")
+  description     String
+  category        RiskCategory
+  defaultSeverity RiskSeverity @map("default_severity")
+  enabled         Boolean      @default(true)
+  parameters      Json?        // { thresholdDays: 30 } etc.
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt        @map("updated_at")
+
+  events          RiskEvent[]
+
+  @@map("risk_rules")
+}
+
+/// A triggered instance of a risk rule against a specific asset.
+model RiskEvent {
+  id              String          @id @default(cuid())
+  orgId           String          @map("org_id")
+  assetId         String?         @map("asset_id")
+  ruleId          String?         @map("rule_id")
+  ruleCode        String          @map("rule_code")   // denormalised for fast queries
+  category        RiskCategory
+  severity        RiskSeverity
+  status          RiskStatus      @default(OPEN)
+  escalationLevel EscalationLevel @default(NONE)      @map("escalation_level")
+
+  title           String
+  titleJa         String?         @map("title_ja")
+  description     String
+  descriptionJa   String?         @map("description_ja")
+
+  // Explainability
+  triggerData           Json?     @map("trigger_data")       // snapshot of the data that fired the rule
+  sourceDocumentIds     String[]  @map("source_document_ids")
+  recommendedAction     String?   @map("recommended_action")
+  recommendedActionJa   String?   @map("recommended_action_ja")
+  confidence            Float?                               // 0.0–1.0
+
+  // AI-generated context (populated lazily)
+  aiAnalysis      String?  @map("ai_analysis")
+  aiAnalysisJa    String?  @map("ai_analysis_ja")
+  aiAnalyzedAt    DateTime? @map("ai_analyzed_at")
+
+  // Temporal
+  firstDetectedAt DateTime  @default(now()) @map("first_detected_at")
+  lastEvaluatedAt DateTime  @default(now()) @map("last_evaluated_at")
+  dueDate         DateTime?                 @map("due_date")
+  acknowledgedAt  DateTime?                 @map("acknowledged_at")
+  acknowledgedBy  String?                   @map("acknowledged_by")
+  resolvedAt      DateTime?                 @map("resolved_at")
+  resolvedBy      String?                   @map("resolved_by")
+  suppressedUntil DateTime?                 @map("suppressed_until")
+
+  // Recurrence
+  occurrenceCount Int @default(1) @map("occurrence_count")
+  recurrenceCount Int @default(0) @map("recurrence_count")
+  lastResolvedAt  DateTime?      @map("last_resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  asset       Asset?          @relation(fields: [assetId], references: [id])
+  rule        RiskRule?       @relation(fields: [ruleId], references: [id])
+  escalations RiskEscalation[]
+
+  @@unique([assetId, ruleCode])   // one open event per rule per asset
+  @@index([orgId, status])
+  @@index([assetId, status])
+  @@index([severity, status])
+  @@map("risk_events")
+}
+
+/// History of escalation actions on a RiskEvent.
+model RiskEscalation {
+  id          String          @id @default(cuid())
+  eventId     String          @map("event_id")
+  level       EscalationLevel
+  escalatedBy String?         @map("escalated_by")
+  escalatedAt DateTime        @default(now()) @map("escalated_at")
+  note        String?
+
+  event RiskEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("risk_escalations")
+}
+
+/// Computed health score for an asset — refreshed on every risk engine run.
+model AssetHealthScore {
+  id                String  @id @default(cuid())
+  assetId           String  @unique @map("asset_id")
+  orgId             String  @map("org_id")
+
+  overallScore      Float   @map("overall_score")       // 0–100
+  leaseScore        Float   @map("lease_score")
+  debtScore         Float   @map("debt_score")
+  reportingScore    Float   @map("reporting_score")
+  complianceScore   Float   @map("compliance_score")
+  treasuryScore     Float   @map("treasury_score")
+  completenessScore Float   @map("completeness_score")  // data completeness
+  confidenceScore   Float   @map("confidence_score")    // how reliable the scores are
+
+  openCritical      Int @default(0) @map("open_critical")
+  openWarnings      Int @default(0) @map("open_warnings")
+  openInfo          Int @default(0) @map("open_info")
+  openEscalated     Int @default(0) @map("open_escalated")
+
+  scoredAt  DateTime @default(now()) @map("scored_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt     @map("updated_at")
+
+  asset Asset @relation(fields: [assetId], references: [id])
+
+  @@map("asset_health_scores")
 }
