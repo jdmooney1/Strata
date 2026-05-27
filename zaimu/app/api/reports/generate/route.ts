@@ -218,7 +218,7 @@ Language: ${language === "ja" ? "Write all content in formal Japanese (書き言
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 6000,
+      max_tokens: 16000,
       system: REPORT_SYSTEM,
       messages: [{ role: "user", content: userPrompt }],
     });
@@ -236,7 +236,49 @@ Language: ${language === "ja" ? "Write all content in formal Japanese (書き言
       const e = responseText.lastIndexOf("}");
       reportJson = s !== -1 && e > s ? responseText.slice(s, e + 1) : responseText;
     }
-    const reportContent = JSON.parse(reportJson) as Record<string, unknown>;
+
+    // Attempt strict parse; on failure try to recover a partial report
+    let reportContent: Record<string, unknown>;
+    try {
+      reportContent = JSON.parse(reportJson) as Record<string, unknown>;
+    } catch {
+      // Truncated response — salvage what we can from the sections array
+      const sectionsMatch = reportJson.match(/"sections"\s*:\s*(\[[\s\S]*)/);
+      if (sectionsMatch) {
+        let arr = sectionsMatch[1];
+        // Find last complete section object boundary
+        const lastComplete = arr.lastIndexOf("},");
+        if (lastComplete !== -1) arr = arr.slice(0, lastComplete + 1) + "]";
+        else {
+          const lastClose = arr.lastIndexOf("}");
+          if (lastClose !== -1) arr = arr.slice(0, lastClose + 1) + "]";
+        }
+        // Iteratively strip last incomplete section
+        let sections: unknown[] | null = null;
+        for (let i = 0; i < 5; i++) {
+          try { sections = JSON.parse(arr) as unknown[]; break; } catch {
+            const cut = arr.lastIndexOf("},");
+            if (cut === -1) break;
+            arr = arr.slice(0, cut + 1) + "]";
+          }
+        }
+        // Extract top-level scalar fields via regex
+        const extract = (key: string) =>
+          (reportJson.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`))?.[1] ?? "");
+        reportContent = {
+          title: extract("title") || `${reportType} — ${period}`,
+          period,
+          sections: sections ?? [],
+          requiredDecisions: [],
+          nextActions: [],
+          dataGaps: ["Report was truncated — some sections may be incomplete."],
+          overallStatus: extract("overallStatus") || "AMBER",
+          overallStatusReason: extract("overallStatusReason") || "Report generation was truncated.",
+        };
+      } else {
+        throw new Error(`Could not parse report response: ${reportJson.slice(0, 200)}`);
+      }
+    }
 
     // Save report to DB
     const report = await db.report.create({
