@@ -29,12 +29,22 @@ export async function generateMetadata({
 // ── Type helpers ─────────────────────────────────────────────────────────────
 
 interface ReportSection {
-  heading: string;
-  headingJa?: string;
-  body: string;
-  bodyJa?: string;
+  id?: string;
+  title?: string;
+  content?: string;
   status?: string;
   flags?: string[];
+  // Legacy fields kept for backwards compatibility with older reports
+  heading?: string;
+  headingJa?: string;
+  body?: string;
+  bodyJa?: string;
+}
+
+interface NextAction {
+  action?: string;
+  owner?: string;
+  dueDate?: string;
 }
 
 interface ReportContent {
@@ -42,8 +52,8 @@ interface ReportContent {
   overallStatus?: string;
   overallStatusReason?: string;
   sections?: ReportSection[];
-  requiredDecisions?: string[];
-  nextActions?: string[];
+  requiredDecisions?: Array<string | { decision?: string; rationale?: string }>;
+  nextActions?: Array<string | NextAction>;
   dataGaps?: string[];
 }
 
@@ -110,14 +120,23 @@ async function ReportDetailContent({ id }: { id: string }) {
   const statusCfg = STATUS_CONFIG[report.status] ?? { cls: "badge-gray", label: report.status };
   const sections = Array.isArray(content?.sections) ? (content.sections as ReportSection[]) : [];
   const requiredDecisions = Array.isArray(content?.requiredDecisions)
-    ? (content.requiredDecisions as string[])
+    ? content.requiredDecisions
     : [];
   const nextActions = Array.isArray(content?.nextActions)
-    ? (content.nextActions as string[])
+    ? content.nextActions
     : [];
   const dataGaps = Array.isArray(content?.dataGaps)
     ? (content.dataGaps as string[])
     : [];
+
+  const formatDecision = (d: string | { decision?: string; rationale?: string }): string => {
+    if (typeof d === "string") return d;
+    if (d && typeof d === "object") {
+      const text = d.decision ?? "";
+      return d.rationale ? `${text} — ${d.rationale}` : text;
+    }
+    return "";
+  };
 
   return (
     <div className="space-y-5">
@@ -207,51 +226,55 @@ async function ReportDetailContent({ id }: { id: string }) {
       {sections.length > 0 && (
         <div className="space-y-4">
           <p className="section-label">Report Sections</p>
-          {sections.map((section, i) => (
-            <div key={i} className="data-card">
-              <div className="data-card-header">
-                <h2 className="text-sm font-semibold">{section.heading}</h2>
-                {section.status && (
-                  <span
-                    className={`badge ${
-                      section.status === "GREEN"
-                        ? "badge-green"
-                        : section.status === "AMBER"
-                        ? "badge-amber"
-                        : section.status === "RED"
-                        ? "badge-red"
-                        : "badge-gray"
-                    }`}
-                  >
-                    {section.status}
-                  </span>
-                )}
+          {sections.map((section, i) => {
+            const heading = section.title ?? section.heading ?? `Section ${i + 1}`;
+            const body = section.content ?? section.body ?? "";
+            return (
+              <div key={i} className="data-card">
+                <div className="data-card-header">
+                  <h2 className="text-sm font-semibold">{heading}</h2>
+                  {section.status && (
+                    <span
+                      className={`badge ${
+                        section.status === "GREEN"
+                          ? "badge-green"
+                          : section.status === "AMBER"
+                          ? "badge-amber"
+                          : section.status === "RED"
+                          ? "badge-red"
+                          : "badge-gray"
+                      }`}
+                    >
+                      {section.status}
+                    </span>
+                  )}
+                </div>
+                <div className="data-card-body space-y-3">
+                  {section.headingJa && (
+                    <p className="text-xs text-[var(--color-text-muted)]">{section.headingJa}</p>
+                  )}
+                  <p className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-line">
+                    {body}
+                  </p>
+                  {section.bodyJa && (
+                    <div className="pt-3 border-t border-[var(--color-border)]">
+                      <p className="text-xs font-semibold text-[var(--color-text-secondary)] mb-1">日本語</p>
+                      <p className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-line">
+                        {section.bodyJa}
+                      </p>
+                    </div>
+                  )}
+                  {Array.isArray(section.flags) && section.flags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-2 border-t border-[var(--color-border)]">
+                      {section.flags.map((flag, fi) => (
+                        <span key={fi} className="badge badge-amber">{flag}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="data-card-body space-y-3">
-                {section.headingJa && (
-                  <p className="text-xs text-[var(--color-text-muted)]">{section.headingJa}</p>
-                )}
-                <p className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-line">
-                  {section.body}
-                </p>
-                {section.bodyJa && (
-                  <div className="pt-3 border-t border-[var(--color-border)]">
-                    <p className="text-xs font-semibold text-[var(--color-text-secondary)] mb-1">日本語</p>
-                    <p className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-line">
-                      {section.bodyJa}
-                    </p>
-                  </div>
-                )}
-                {Array.isArray(section.flags) && section.flags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-[var(--color-border)]">
-                    {section.flags.map((flag, fi) => (
-                      <span key={fi} className="badge badge-amber">{flag}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -271,7 +294,7 @@ async function ReportDetailContent({ id }: { id: string }) {
                 {requiredDecisions.map((d, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-[var(--color-text-primary)]">
                     <span className="text-[var(--color-navy-500)] font-semibold mt-0.5">{i + 1}.</span>
-                    {d}
+                    <span>{formatDecision(d)}</span>
                   </li>
                 ))}
               </ul>
@@ -287,13 +310,32 @@ async function ReportDetailContent({ id }: { id: string }) {
                   <h2 className="text-sm font-semibold">Next Actions</h2>
                 </div>
               </div>
-              <ul className="data-card-body space-y-2">
-                {nextActions.map((a, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-[var(--color-text-primary)]">
-                    <span className="text-[var(--color-status-green)] mt-0.5">→</span>
-                    {a}
-                  </li>
-                ))}
+              <ul className="data-card-body space-y-2.5">
+                {nextActions.map((a, i) => {
+                  if (typeof a === "string") {
+                    return (
+                      <li key={i} className="flex items-start gap-2 text-sm text-[var(--color-text-primary)]">
+                        <span className="text-[var(--color-status-green)] mt-0.5">→</span>
+                        <span>{a}</span>
+                      </li>
+                    );
+                  }
+                  return (
+                    <li key={i} className="flex items-start gap-2 text-sm text-[var(--color-text-primary)]">
+                      <span className="text-[var(--color-status-green)] mt-0.5">→</span>
+                      <div className="flex-1">
+                        <p>{a.action ?? ""}</p>
+                        {(a.owner || a.dueDate) && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            {a.owner && <span>Owner: {a.owner}</span>}
+                            {a.owner && a.dueDate && <span> · </span>}
+                            {a.dueDate && <span>Due: {a.dueDate}</span>}
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
