@@ -12,6 +12,7 @@ import {
   CheckSquare,
   Bell,
   ShieldAlert,
+  GitBranch,
   DollarSign,
   FileBarChart,
   Archive,
@@ -50,6 +51,7 @@ const navSections: NavSection[] = [
       { href: '/tasks',      label: 'Tasks',               Icon: CheckSquare },
       { href: '/alerts',     label: 'Alerts',              Icon: Bell },
       { href: '/risk',       label: 'Risk Engine',         Icon: ShieldAlert },
+      { href: '/workflows',  label: 'Workflows',           Icon: GitBranch },
     ],
   },
   {

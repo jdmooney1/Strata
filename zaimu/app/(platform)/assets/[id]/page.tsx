@@ -16,6 +16,7 @@ import {
   Calendar,
   Sparkles,
   ShieldAlert,
+  GitBranch,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import {
@@ -51,7 +52,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 async function AssetDetailContent({ id }: { id: string }) {
-  const [asset, healthScore, openRiskCount] = await Promise.all([
+  const [asset, healthScore, openRiskCount, assetWorkflows] = await Promise.all([
   db.asset.findUnique({
     where: { id },
     include: {
@@ -93,6 +94,19 @@ async function AssetDetailContent({ id }: { id: string }) {
       assetId: id,
       status: { in: ["OPEN", "ACKNOWLEDGED", "ESCALATED"] },
     },
+  }),
+  db.workflow.findMany({
+    where: {
+      assetId: id,
+      status: { notIn: ["CANCELLED"] },
+    },
+    include: {
+      steps: {
+        select: { id: true, status: true },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 5,
   }),
   ]);
 
@@ -936,6 +950,70 @@ async function AssetDetailContent({ id }: { id: string }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Workflows */}
+      <div className="data-card">
+        <div className="data-card-header">
+          <div className="flex items-center gap-2">
+            <GitBranch className="size-4 text-[var(--color-navy-500)]" />
+            <h2 className="text-sm font-semibold">Operational Workflows</h2>
+          </div>
+          <Link
+            href={`/workflows/new?assetId=${asset.id}`}
+            className="text-xs text-[var(--color-text-link)] hover:underline"
+          >
+            + New workflow
+          </Link>
+        </div>
+        {assetWorkflows.length === 0 ? (
+          <div className="px-4 py-4 text-xs text-[var(--color-text-muted)]">
+            No workflows for this asset.{" "}
+            <Link href="/workflows/new" className="text-[var(--color-text-link)] hover:underline">
+              Create one →
+            </Link>
+          </div>
+        ) : (
+          <div className="divide-y divide-[var(--color-border)]">
+            {assetWorkflows.map((wf) => {
+              const total = wf.steps.length;
+              const done = wf.steps.filter(
+                (s) => s.status === "COMPLETE" || s.status === "SKIPPED"
+              ).length;
+              return (
+                <Link
+                  key={wf.id}
+                  href={`/workflows/${wf.id}`}
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-[var(--color-slate-50)] transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                      {wf.title}
+                    </p>
+                    {total > 0 && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                        {done}/{total} steps
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    className={`badge flex-shrink-0 ${
+                      wf.status === "ACTIVE"
+                        ? "badge-navy"
+                        : wf.status === "BLOCKED"
+                        ? "badge-red"
+                        : wf.status === "COMPLETED"
+                        ? "badge-green"
+                        : "badge-gray"
+                    }`}
+                  >
+                    {wf.status}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

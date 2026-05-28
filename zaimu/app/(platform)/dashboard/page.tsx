@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
+  GitBranch,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import {
@@ -29,7 +30,7 @@ export const dynamic = "force-dynamic";
 const ORG_ID = "org_sanyo_001";
 
 async function DashboardContent() {
-  const [assets, allLoans, alerts, tasks, fxRates, riskEvents] = await Promise.all([
+  const [assets, allLoans, alerts, tasks, fxRates, riskEvents, activeWorkflows] = await Promise.all([
     db.asset.findMany({
       where: { orgId: ORG_ID },
       include: { loans: { include: { covenants: true } } },
@@ -59,6 +60,23 @@ async function DashboardContent() {
       include: { asset: { select: { id: true, name: true } } },
       orderBy: { firstDetectedAt: "desc" },
       take: 3,
+    }),
+    db.workflow.findMany({
+      where: {
+        orgId: ORG_ID,
+        status: { in: ["ACTIVE", "BLOCKED"] },
+      },
+      include: {
+        asset: { select: { id: true, name: true } },
+        steps: {
+          where: { status: { in: ["IN_PROGRESS", "BLOCKED", "OVERDUE", "PENDING_APPROVAL"] } },
+          select: { id: true, name: true, status: true, dueDate: true },
+          orderBy: { stepOrder: "asc" },
+          take: 1,
+        },
+      },
+      orderBy: { targetDate: "asc" },
+      take: 4,
     }),
   ]);
 
@@ -419,6 +437,62 @@ async function DashboardContent() {
               {tasks.length === 0 && (
                 <p className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
                   No open tasks
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Active Workflows */}
+          <div className="data-card">
+            <div className="data-card-header">
+              <div className="flex items-center gap-2">
+                <GitBranch className="size-4 text-[var(--color-navy-500)]" />
+                <h2 className="text-sm font-semibold">Active Workflows</h2>
+              </div>
+              <Link
+                href="/workflows"
+                className="text-xs text-[var(--color-text-link)] hover:underline"
+              >
+                View all →
+              </Link>
+            </div>
+            <div className="divide-y divide-[var(--color-border)]">
+              {activeWorkflows.map((wf) => {
+                const currentStep = wf.steps[0] ?? null;
+                return (
+                  <Link
+                    key={wf.id}
+                    href={`/workflows/${wf.id}`}
+                    className="block px-4 py-2.5 hover:bg-[var(--color-slate-50)] transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-[var(--color-text-primary)] truncate">
+                          {wf.title}
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">
+                          {wf.asset.name}
+                        </p>
+                        {currentStep && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">
+                            ↳ {currentStep.name}
+                          </p>
+                        )}
+                      </div>
+                      <span
+                        className={`badge flex-shrink-0 mt-0.5 ${
+                          wf.status === "BLOCKED" ? "badge-red" : "badge-navy"
+                        }`}
+                      >
+                        {wf.status}
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
+              {activeWorkflows.length === 0 && (
+                <p className="px-4 py-3 text-xs text-[var(--color-text-muted)]">
+                  No active workflows
                 </p>
               )}
             </div>

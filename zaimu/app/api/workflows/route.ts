@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getOrgId } from "@/lib/auth";
 import { createAuditLog } from "@/lib/audit";
 import { WorkflowStatus, WorkflowType } from "@/app/generated/prisma";
+import type { WorkflowCreateInput } from "@/lib/workflow-engine";
 
 export const runtime = "nodejs";
 
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let createWorkflow: (args: Record<string, unknown>) => Promise<unknown>;
+    let createWorkflow: (input: WorkflowCreateInput) => Promise<{ id: string }>;
     try {
       const engine = await import("@/lib/workflow-engine");
       createWorkflow = engine.createWorkflow;
