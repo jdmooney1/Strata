@@ -1,106 +1,72 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Search, Bell } from 'lucide-react';
 
 interface TopbarProps {
   title?: string;
-  /** Number of notifications to display — defaults to 3 */
   notificationCount?: number;
 }
 
-const CURRENT_DATE_JA = '2026年5月22日';
-const ORG_NAME_JA = '三洋キャピタルホールディングス';
+const CURRENT_DATE = '01 Jun 2026';
+const ORG_SHORT = 'SCH · Tokyo';
 const USER_INITIALS = 'KY';
 
 export function Topbar({ title, notificationCount = 3 }: TopbarProps) {
-  const [lang, setLang] = useState<'ja' | 'en'>('ja');
-
   return (
     <header className="page-header">
-      {/* Left: page title */}
-      {title && (
-        <h1 className="text-base font-semibold text-[var(--color-text-primary)] truncate">
-          {title}
-        </h1>
-      )}
+      {/* Left: empty spacer (page titles come from h1 in page content) */}
+      <div className="flex items-center gap-3">
+        <span
+          className="text-xs font-mono text-[var(--color-text-muted)]"
+          style={{ letterSpacing: '0.04em' }}
+        >
+          {CURRENT_DATE}
+        </span>
+        <span className="text-xs text-[var(--color-border-strong)]">|</span>
+        <span
+          className="text-xs text-[var(--color-text-muted)] font-medium"
+        >
+          {ORG_SHORT}
+        </span>
+      </div>
 
-      {/* Right: controls */}
-      <div className="flex items-center gap-3 flex-shrink-0">
-        {/* Date + org */}
-        <div className="hidden sm:flex flex-col items-end">
-          <span className="text-xs text-[var(--color-text-secondary)] font-medium">
-            {CURRENT_DATE_JA}
-          </span>
-          <span className="text-[0.625rem] text-[var(--color-text-muted)] leading-tight">
-            {ORG_NAME_JA}
-          </span>
-        </div>
-
-        {/* Divider */}
-        <div className="hidden sm:block h-6 w-px bg-[var(--color-border)]" />
-
-        {/* Language toggle */}
-        <div className="flex items-center rounded-md border border-[var(--color-border)] overflow-hidden text-xs font-medium">
-          <button
-            onClick={() => setLang('ja')}
-            className={[
-              'px-2 py-1 transition-colors duration-100',
-              lang === 'ja'
-                ? 'bg-[var(--color-navy-900)] text-white'
-                : 'bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-slate-50)]',
-            ].join(' ')}
-            aria-pressed={lang === 'ja'}
-            aria-label="Japanese"
-          >
-            日本語
-          </button>
-          <button
-            onClick={() => setLang('en')}
-            className={[
-              'px-2 py-1 transition-colors duration-100',
-              lang === 'en'
-                ? 'bg-[var(--color-navy-900)] text-white'
-                : 'bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-slate-50)]',
-            ].join(' ')}
-            aria-pressed={lang === 'en'}
-            aria-label="English"
-          >
-            EN
-          </button>
-        </div>
-
+      {/* Right: utility controls */}
+      <div className="flex items-center gap-2 flex-shrink-0">
         {/* Search */}
         <button
-          className="flex items-center justify-center size-8 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-slate-100)] hover:text-[var(--color-text-primary)] transition-colors duration-100"
+          className="flex items-center justify-center size-7 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
           aria-label="Search"
         >
-          <Search className="size-4" />
+          <Search className="size-3.5" />
         </button>
 
-        {/* Notification bell */}
+        {/* Notification */}
         <div className="relative">
           <button
-            className="flex items-center justify-center size-8 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-slate-100)] hover:text-[var(--color-text-primary)] transition-colors duration-100"
+            className="flex items-center justify-center size-7 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
             aria-label={`Notifications (${notificationCount} unread)`}
           >
-            <Bell className="size-4" />
+            <Bell className="size-3.5" />
           </button>
           {notificationCount > 0 && (
             <span
-              className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-[var(--color-status-red)] text-white text-[0.5625rem] font-bold leading-none"
-              aria-hidden="true"
+              className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[14px] h-3.5 px-1 bg-[var(--color-status-red)] text-white text-[0.5rem] font-bold leading-none"
+              style={{ borderRadius: '2px' }}
             >
               {notificationCount > 9 ? '9+' : notificationCount}
             </span>
           )}
         </div>
 
-        {/* User avatar */}
+        <div className="h-4 w-px bg-[var(--color-border)]" />
+
+        {/* User chip */}
         <div
-          className="flex items-center justify-center size-8 rounded-full bg-[var(--color-navy-900)] text-white text-xs font-bold flex-shrink-0 select-none"
+          className="flex items-center justify-center size-6 bg-[var(--color-navy-800)] text-white text-[0.5625rem] font-bold flex-shrink-0 select-none"
+          style={{ borderRadius: '2px' }}
           aria-label="Kenji Yamamoto"
-          title="Kenji Yamamoto"
+          title="Kenji Yamamoto — Fund Manager"
         >
           {USER_INITIALS}
         </div>

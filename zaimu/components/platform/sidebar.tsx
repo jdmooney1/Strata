@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   BarChart3,
   Building2,
-  Layers,
   FileText,
   CheckSquare,
   Bell,
@@ -16,6 +15,7 @@ import {
   DollarSign,
   FileBarChart,
   Archive,
+  ClipboardList,
 } from 'lucide-react';
 
 interface NavItem {
@@ -31,40 +31,40 @@ interface NavSection {
 
 const navSections: NavSection[] = [
   {
-    title: 'Overview',
+    title: 'Situation',
     items: [
-      { href: '/dashboard',  label: 'Dashboard',          Icon: LayoutDashboard },
-      { href: '/portfolio',  label: 'Portfolio',           Icon: BarChart3 },
+      { href: '/dashboard',  label: 'Command Centre',     Icon: LayoutDashboard },
+      { href: '/risk',       label: 'Risk Monitor',       Icon: ShieldAlert },
+      { href: '/executive',  label: 'Executive Summary',  Icon: ClipboardList },
     ],
   },
   {
-    title: 'Assets',
+    title: 'Portfolio',
     items: [
-      { href: '/assets',     label: 'All Assets',          Icon: Building2 },
-      { href: '/assets',     label: 'Asset Intelligence',  Icon: Layers },
+      { href: '/assets',     label: 'Assets',          Icon: Building2 },
+      { href: '/portfolio',  label: 'Portfolio',        Icon: BarChart3 },
     ],
   },
   {
     title: 'Operations',
     items: [
-      { href: '/documents',  label: 'Documents',           Icon: FileText },
-      { href: '/tasks',      label: 'Tasks',               Icon: CheckSquare },
-      { href: '/alerts',     label: 'Alerts',              Icon: Bell },
-      { href: '/risk',       label: 'Risk Engine',         Icon: ShieldAlert },
-      { href: '/workflows',  label: 'Workflows',           Icon: GitBranch },
+      { href: '/workflows',  label: 'Workflows',        Icon: GitBranch },
+      { href: '/tasks',      label: 'Tasks',            Icon: CheckSquare },
+      { href: '/alerts',     label: 'Alerts',           Icon: Bell },
+      { href: '/documents',  label: 'Documents',        Icon: FileText },
     ],
   },
   {
     title: 'Finance',
     items: [
-      { href: '/treasury',   label: 'Treasury & FX',       Icon: DollarSign },
+      { href: '/treasury',   label: 'Treasury & FX',   Icon: DollarSign },
     ],
   },
   {
-    title: 'Reporting',
+    title: 'Intelligence',
     items: [
-      { href: '/reports',    label: 'Board Reports',       Icon: FileBarChart },
-      { href: '/memory',     label: 'Memory',              Icon: Archive },
+      { href: '/reports',    label: 'Board Reports',   Icon: FileBarChart },
+      { href: '/memory',     label: 'AI Memory',       Icon: Archive },
     ],
   },
 ];
@@ -79,7 +79,10 @@ export function Sidebar() {
         <div className="flex items-center justify-center size-7 rounded bg-white text-[var(--color-navy-900)] font-bold text-sm select-none flex-shrink-0">
           Z
         </div>
-        <span className="text-white font-semibold text-sm tracking-wide">ZAIMU</span>
+        <div className="flex flex-col leading-none">
+          <span className="text-white font-semibold text-sm tracking-wide">ZAIMU</span>
+          <span className="text-white/35 mt-0.5" style={{ fontSize: '9px' }}>三洋 Capital</span>
+        </div>
       </div>
 
       {/* Navigation */}
@@ -146,7 +149,7 @@ export function Sidebar() {
             Kenji Yamamoto
           </p>
           <p className="text-[0.625rem] text-white/40 truncate leading-tight mt-0.5">
-            Sanyo Capital Holdings
+            三洋キャピタル
           </p>
         </div>
       </div>
