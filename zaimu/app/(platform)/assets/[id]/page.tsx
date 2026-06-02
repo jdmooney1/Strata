@@ -169,8 +169,8 @@ async function AssetDetailContent({ id }: { id: string }) {
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <div
-            className="size-12 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
-            style={{ background: "var(--color-navy-100)" }}
+            className="size-8 flex items-center justify-center text-sm flex-shrink-0"
+            style={{ background: "var(--color-navy-100)", borderRadius: "2px" }}
           >
             {countryFlag(asset.country)}
           </div>
@@ -220,88 +220,89 @@ async function AssetDetailContent({ id }: { id: string }) {
         )}
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <div className="data-card p-4">
-          <p className="section-label">Current Valuation</p>
-          <p className="text-xs text-[var(--color-text-muted)]">現在評価額</p>
-          <p className="text-2xl font-semibold font-numeric mt-1">
-            {asset.currentValuation
-              ? `${asset.currency} ${formatMillions(Number(asset.currentValuation))}M`
-              : "—"}
-          </p>
-          {asset.lastValuationDate && (
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-              as at {formatDate(asset.lastValuationDate.toISOString(), "short")}
-            </p>
-          )}
-        </div>
-
-        <div className="data-card p-4">
-          <p className="section-label">Total Debt</p>
-          <p className="text-xs text-[var(--color-text-muted)]">総負債額</p>
-          <p className="text-2xl font-semibold font-numeric mt-1">
-            {totalDebt > 0
-              ? `${asset.currency} ${formatMillions(totalDebt)}M`
-              : "Unlevered"}
-          </p>
-          {primaryLoan?.ltv != null && (
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-              LTV {formatPercent(Number(primaryLoan.ltv) / 100)}
-            </p>
-          )}
-        </div>
-
-        <div className="data-card p-4">
-          <p className="section-label">Occupancy</p>
-          <p className="text-xs text-[var(--color-text-muted)]">稼働率</p>
-          <p className="text-2xl font-semibold font-numeric mt-1">
-            {asset.occupancyRate != null
-              ? formatPercent(Number(asset.occupancyRate) / 100)
-              : "—"}
-          </p>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            {asset.totalArea != null ? Number(asset.totalArea).toLocaleString() : "—"} {asset.areaUnit}
-          </p>
-        </div>
-
-        <div className="data-card p-4">
-          <p className="section-label">WAULT</p>
-          <p className="text-xs text-[var(--color-text-muted)]">加重平均残存期間</p>
-          <p
-            className={`text-2xl font-semibold font-numeric mt-1 ${
-              wault == null ? "" : wault <= 1 ? "text-[var(--color-status-red)]" : wault <= 3 ? "text-[var(--color-status-amber)]" : ""
-            }`}
-          >
-            {wault != null ? `${wault.toFixed(1)}yr` : "—"}
-          </p>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            {activeLeases.length} active lease{activeLeases.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        <div className="data-card p-4">
-          <p className="section-label">Annual Rent</p>
-          <p className="text-xs text-[var(--color-text-muted)]">年間賃料</p>
-          <p className="text-2xl font-semibold font-numeric mt-1">
-            {annualRent > 0
-              ? `${asset.currency} ${formatMillions(annualRent)}M`
-              : "—"}
-          </p>
-          {monthsToRefi != null && monthsToRefi > 0 && (
-            <p
-              className={`text-xs mt-0.5 font-medium ${
-                monthsToRefi <= 6
-                  ? "text-[var(--color-status-red)]"
-                  : monthsToRefi <= 12
-                  ? "text-[var(--color-status-amber)]"
-                  : "text-[var(--color-text-muted)]"
-              }`}
-            >
-              Refi in {monthsToRefi}mo
-            </p>
-          )}
-        </div>
+      {/* Asset Metrics */}
+      <div className="data-card overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-[var(--color-border)]">
+              <th className="px-4 py-2.5 text-left section-label">Valuation</th>
+              <th className="px-4 py-2.5 text-right section-label">Total Debt</th>
+              <th className="px-4 py-2.5 text-right section-label">Occupancy</th>
+              <th className="px-4 py-2.5 text-right section-label">WAULT</th>
+              <th className="px-4 py-2.5 text-right section-label">Annual Rent</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="px-4 py-3">
+                <p className="text-sm font-semibold font-numeric">
+                  {asset.currentValuation
+                    ? `${asset.currency} ${formatMillions(Number(asset.currentValuation))}M`
+                    : "—"}
+                </p>
+                {asset.lastValuationDate && (
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    as at {formatDate(asset.lastValuationDate.toISOString(), "short")}
+                  </p>
+                )}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p className="text-sm font-semibold font-numeric">
+                  {totalDebt > 0
+                    ? `${asset.currency} ${formatMillions(totalDebt)}M`
+                    : "Unlevered"}
+                </p>
+                {primaryLoan?.ltv != null && (
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    LTV {formatPercent(Number(primaryLoan.ltv) / 100)}
+                  </p>
+                )}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p className="text-sm font-semibold font-numeric">
+                  {asset.occupancyRate != null
+                    ? formatPercent(Number(asset.occupancyRate) / 100)
+                    : "—"}
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                  {asset.totalArea != null ? Number(asset.totalArea).toLocaleString() : "—"} {asset.areaUnit}
+                </p>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p
+                  className={`text-sm font-semibold font-numeric ${
+                    wault == null ? "" : wault <= 1 ? "text-[var(--color-status-red)]" : wault <= 3 ? "text-[var(--color-status-amber)]" : ""
+                  }`}
+                >
+                  {wault != null ? `${wault.toFixed(1)}yr` : "—"}
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                  {activeLeases.length} active lease{activeLeases.length !== 1 ? "s" : ""}
+                </p>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p className="text-sm font-semibold font-numeric">
+                  {annualRent > 0
+                    ? `${asset.currency} ${formatMillions(annualRent)}M`
+                    : "—"}
+                </p>
+                {monthsToRefi != null && monthsToRefi > 0 && (
+                  <p
+                    className={`text-xs mt-0.5 font-medium ${
+                      monthsToRefi <= 6
+                        ? "text-[var(--color-status-red)]"
+                        : monthsToRefi <= 12
+                        ? "text-[var(--color-status-amber)]"
+                        : "text-[var(--color-text-muted)]"
+                    }`}
+                  >
+                    Refi in {monthsToRefi}mo
+                  </p>
+                )}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* Alerts */}
@@ -369,44 +370,43 @@ async function AssetDetailContent({ id }: { id: string }) {
                     </div>
 
                     {loan.covenants.length > 0 && (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {loan.covenants.map((cov) => (
-                          <div
-                            key={cov.id}
-                            className="bg-[var(--color-slate-50)] rounded p-3"
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              <p className="text-xs font-medium">
-                                {cov.covenantType}
-                              </p>
-                              <span
-                                className={`badge ${covenantBadgeClass(
-                                  cov.status
-                                )}`}
-                              >
-                                {cov.status}
-                              </span>
-                            </div>
-                            <p className="text-xs text-[var(--color-text-muted)]">
-                              Current:{" "}
-                              <span className="font-semibold text-[var(--color-text-primary)]">
-                                {cov.currentValue ?? "—"}
-                              </span>
-                            </p>
-                            <p className="text-xs text-[var(--color-text-muted)]">
-                              Threshold: {cov.threshold}
-                            </p>
-                            {cov.nextTestDate && (
-                              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                                Next test:{" "}
-                                {formatDate(
-                                  cov.nextTestDate.toISOString(),
-                                  "short"
-                                )}
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border-t border-[var(--color-border)]">
+                          <thead>
+                            <tr className="bg-[var(--color-slate-50)] border-b border-[var(--color-border)]">
+                              <th className="px-4 py-2 text-left font-semibold text-[var(--color-text-muted)]">Covenant</th>
+                              <th className="px-4 py-2 text-right font-semibold text-[var(--color-text-muted)]">Current</th>
+                              <th className="px-4 py-2 text-right font-semibold text-[var(--color-text-muted)]">Threshold</th>
+                              <th className="px-4 py-2 text-left font-semibold text-[var(--color-text-muted)]">Next Test</th>
+                              <th className="px-4 py-2 text-center font-semibold text-[var(--color-text-muted)]">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {loan.covenants.map((cov) => (
+                              <tr key={cov.id} className="border-b border-[var(--color-border)] last:border-0">
+                                <td className="px-4 py-2.5 font-medium text-[var(--color-text-primary)]">
+                                  {cov.covenantType}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-semibold font-numeric">
+                                  {cov.currentValue ?? "—"}
+                                </td>
+                                <td className="px-4 py-2.5 text-right text-[var(--color-text-muted)]">
+                                  {cov.threshold}
+                                </td>
+                                <td className="px-4 py-2.5 text-[var(--color-text-muted)]">
+                                  {cov.nextTestDate
+                                    ? formatDate(cov.nextTestDate.toISOString(), "short")
+                                    : "—"}
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  <span className={`badge ${covenantBadgeClass(cov.status)}`}>
+                                    {cov.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>
@@ -711,49 +711,35 @@ async function AssetDetailContent({ id }: { id: string }) {
                 )}
               </div>
 
-              {/* Category bars */}
-              <div className="space-y-2.5">
-                {[
-                  { label: "Lease", score: healthScore.leaseScore },
-                  { label: "Debt", score: healthScore.debtScore },
-                  { label: "Reporting", score: healthScore.reportingScore },
-                  { label: "Compliance", score: healthScore.complianceScore },
-                  { label: "Treasury", score: healthScore.treasuryScore },
-                ].map(({ label, score }) => (
-                  <div key={label}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-[var(--color-text-secondary)]">{label}</span>
-                      <span
-                        className={`text-xs font-numeric font-semibold ${
-                          score >= 80
-                            ? "text-green-600"
-                            : score >= 60
-                            ? "text-amber-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {Math.round(score)}
-                      </span>
-                    </div>
-                    <div
-                      className="rounded-full overflow-hidden"
-                      style={{ height: "5px", background: "var(--color-slate-100)" }}
-                    >
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${score}%`,
-                          background:
-                            score >= 80
+              {/* Category scores */}
+              <div className="border-t border-[var(--color-border)]">
+                <table className="w-full text-xs">
+                  <tbody>
+                    {[
+                      { label: "Lease",      score: healthScore.leaseScore },
+                      { label: "Debt",       score: healthScore.debtScore },
+                      { label: "Reporting",  score: healthScore.reportingScore },
+                      { label: "Compliance", score: healthScore.complianceScore },
+                      { label: "Treasury",   score: healthScore.treasuryScore },
+                    ].map(({ label, score }) => (
+                      <tr key={label} className="border-b border-[var(--color-border)] last:border-0">
+                        <td className="px-4 py-2 text-[var(--color-text-secondary)]">{label}</td>
+                        <td
+                          className="px-4 py-2 text-right font-numeric font-semibold"
+                          style={{
+                            color: score >= 80
                               ? "var(--color-status-green)"
                               : score >= 60
                               ? "var(--color-status-amber)"
                               : "var(--color-status-red)",
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                          }}
+                        >
+                          {Math.round(score)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           ) : (
@@ -787,31 +773,19 @@ async function AssetDetailContent({ id }: { id: string }) {
               </div>
               <div className="data-card-body space-y-3">
                 {asset.ownershipEntities.map((entity) => (
-                  <div key={entity.id}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div>
-                        <p className="text-xs font-semibold">
-                          {entity.entityName}
-                        </p>
-                        {entity.entityNameJa && (
-                          <p className="text-xs text-[var(--color-text-muted)]">
-                            {entity.entityNameJa}
-                          </p>
-                        )}
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          {entity.entityType} · {entity.jurisdiction}
-                        </p>
-                      </div>
-                      <span className="text-sm font-semibold font-numeric">
-                        {formatPercent(Number(entity.ownershipPct) / 100)}
-                      </span>
+                  <div key={entity.id} className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold">{entity.entityName}</p>
+                      {entity.entityNameJa && (
+                        <p className="text-xs text-[var(--color-text-muted)]">{entity.entityNameJa}</p>
+                      )}
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        {entity.entityType} · {entity.jurisdiction}
+                      </p>
                     </div>
-                    <div className="progress-bar">
-                      <div
-                        className="progress-bar-fill"
-                        style={{ width: `${entity.ownershipPct}%` }}
-                      />
-                    </div>
+                    <span className="text-sm font-semibold font-numeric flex-shrink-0">
+                      {formatPercent(Number(entity.ownershipPct) / 100)}
+                    </span>
                   </div>
                 ))}
               </div>

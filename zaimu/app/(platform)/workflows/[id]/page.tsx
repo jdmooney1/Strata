@@ -5,20 +5,9 @@ import { Suspense } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
-  PlayCircle,
-  Circle,
-  Clock,
-  XCircle,
-  AlertCircle,
-  MinusCircle,
-  Sparkles,
   GitBranch,
   Calendar,
   User,
-  FileCheck,
-  Milestone,
-  Globe,
-  Zap,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import { formatDate } from "@/lib/utils";
@@ -80,72 +69,15 @@ function stepTypeLabel(type: StepType): string {
   return map[type] ?? type;
 }
 
-function stepTypeIcon(type: StepType): React.ReactElement {
-  switch (type) {
-    case "APPROVAL":        return <FileCheck className="size-2.5" />;
-    case "DOCUMENT_UPLOAD": return <FileCheck className="size-2.5" />;
-    case "MILESTONE":       return <Milestone className="size-2.5" />;
-    case "EXTERNAL":        return <Globe className="size-2.5" />;
-    default:                return <Zap className="size-2.5" />;
-  }
-}
-
-interface StepIconProps {
-  status: StepStatus;
-}
-
-function StepIcon({ status }: StepIconProps) {
+function stepStatusBadgeClass(status: StepStatus): string {
   switch (status) {
-    case "COMPLETE":
-      return (
-        <CheckCircle2
-          className="size-5 flex-shrink-0"
-          style={{ color: "var(--color-status-green)" }}
-        />
-      );
-    case "IN_PROGRESS":
-      return (
-        <PlayCircle
-          className="size-6 flex-shrink-0"
-          style={{ color: "var(--color-navy-700)" }}
-        />
-      );
-    case "PENDING_APPROVAL":
-      return (
-        <Clock
-          className="size-5 flex-shrink-0"
-          style={{ color: "var(--color-status-amber)" }}
-        />
-      );
-    case "BLOCKED":
-      return (
-        <XCircle
-          className="size-5 flex-shrink-0"
-          style={{ color: "var(--color-status-red)" }}
-        />
-      );
-    case "OVERDUE":
-      return (
-        <AlertCircle
-          className="size-5 flex-shrink-0"
-          style={{ color: "var(--color-status-red)" }}
-        />
-      );
-    case "SKIPPED":
-      return (
-        <MinusCircle
-          className="size-5 flex-shrink-0"
-          style={{ color: "var(--color-text-muted)" }}
-        />
-      );
-    case "NOT_STARTED":
-    default:
-      return (
-        <Circle
-          className="size-5 flex-shrink-0"
-          style={{ color: "var(--color-text-muted)" }}
-        />
-      );
+    case "COMPLETE":         return "badge-green";
+    case "IN_PROGRESS":      return "badge-navy";
+    case "PENDING_APPROVAL": return "badge-amber";
+    case "BLOCKED":          return "badge-red";
+    case "OVERDUE":          return "badge-red";
+    case "SKIPPED":          return "badge-gray";
+    default:                 return "badge-gray";
   }
 }
 
@@ -283,38 +215,18 @@ async function WorkflowDetailContent({ id }: { id: string }) {
             )}
           </div>
 
-          {/* AI Suggestions panel */}
+          {/* Workflow analysis */}
           {workflow.aiSuggestions && (
-            <div
-              className="rounded-md px-4 py-3 flex items-start gap-3"
-              style={{
-                background: "var(--color-navy-50, #f0f4ff)",
-                border: "1px solid var(--color-navy-200, #c7d2fe)",
-              }}
-            >
-              <Sparkles
-                className="size-4 flex-shrink-0 mt-0.5"
-                style={{ color: "var(--color-navy-600)" }}
-              />
-              <div className="flex-1 min-w-0">
-                <p
-                  className="text-xs font-semibold mb-1"
-                  style={{ color: "var(--color-navy-700)" }}
-                >
-                  AI Analysis
+            <div className="ai-insight">
+              <p className="ai-insight-label">Workflow Analysis</p>
+              <p className="text-sm text-[var(--color-navy-900)] leading-relaxed">
+                {workflow.aiSuggestions}
+              </p>
+              {workflow.aiAnalyzedAt && (
+                <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                  Analysed {formatDate(workflow.aiAnalyzedAt.toISOString(), "medium")}
                 </p>
-                <p
-                  className="text-xs leading-relaxed"
-                  style={{ color: "var(--color-navy-800, #1e3a5f)" }}
-                >
-                  {workflow.aiSuggestions}
-                </p>
-                {workflow.aiAnalyzedAt && (
-                  <p className="text-[10px] mt-1.5" style={{ color: "var(--color-navy-500)" }}>
-                    Analysed {formatDate(workflow.aiAnalyzedAt.toISOString(), "medium")}
-                  </p>
-                )}
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -329,28 +241,38 @@ async function WorkflowDetailContent({ id }: { id: string }) {
               {completedSteps}/{totalSteps} complete
             </span>
           </div>
-          <div className="px-4 py-4">
-            {/* Vertical stepper */}
-            <div className="relative">
-              {/* Vertical connector line */}
-              <div
-                className="absolute left-[18px] top-6 bottom-6 w-0.5"
-                style={{ background: "var(--color-border)" }}
-              />
-
-              <div className="space-y-0">
-                {allSteps.map((step, idx) => {
-                  const isLast = idx === allSteps.length - 1;
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Step
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Type
+                  </th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Owner
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Due
+                  </th>
+                  <th className="px-3 py-2.5 text-center text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Status
+                  </th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)]">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {allSteps.map((step) => {
                   const isOverdue =
                     step.dueDate != null &&
                     new Date(step.dueDate) < new Date() &&
                     step.status !== "COMPLETE" &&
                     step.status !== "SKIPPED";
-                  const isActive =
-                    step.status === "IN_PROGRESS" ||
-                    step.status === "PENDING_APPROVAL";
 
-                  // Resolve dependency step names
                   const depSteps = step.dependsOnStepIds
                     .map((depId) => stepById.get(depId))
                     .filter(Boolean);
@@ -358,212 +280,111 @@ async function WorkflowDetailContent({ id }: { id: string }) {
                   const pendingApproval =
                     step.approvals.find((a) => a.status === "PENDING") ?? null;
 
+                  const isDone =
+                    step.status === "COMPLETE" || step.status === "SKIPPED";
+
                   return (
-                    <div key={step.id} className="relative flex gap-4">
-                      {/* Icon column */}
-                      <div className="flex flex-col items-center flex-shrink-0 z-10">
-                        <div className="flex items-center justify-center size-9">
-                          <StepIcon status={step.status} />
-                        </div>
-                        {!isLast && (
-                          <div
-                            className="w-0.5 flex-1 min-h-4"
-                            style={{
-                              background: isActive
-                                ? "var(--color-navy-300)"
-                                : "var(--color-border)",
-                            }}
-                          />
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div
-                        className={[
-                          "flex-1 min-w-0 pb-5",
-                          isActive
-                            ? "border-l-2 pl-3 -ml-[1px]"
-                            : "pl-1",
-                        ].join(" ")}
-                        style={
-                          isActive
-                            ? { borderLeftColor: "var(--color-navy-600)" }
-                            : undefined
-                        }
-                      >
-                        {/* Step header row */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wide">
-                              Step {step.stepOrder}
-                            </span>
-                            {/* Step type chip */}
-                            <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
-                              style={{
-                                background: "var(--color-slate-100)",
-                                color: "var(--color-text-muted)",
-                              }}
-                            >
-                              {stepTypeIcon(step.stepType)}
-                              {stepTypeLabel(step.stepType)}
-                            </span>
-                          </div>
-
-                          {/* Due date */}
-                          {step.dueDate && (
-                            <p
-                              className={`text-xs flex-shrink-0 font-medium ${
-                                isOverdue
-                                  ? "text-[var(--color-status-red)]"
-                                  : "text-[var(--color-text-muted)]"
-                              }`}
-                            >
-                              {isOverdue && (
-                                <AlertCircle className="size-3 inline mr-0.5 mb-0.5" />
-                              )}
-                              {formatDate(step.dueDate.toISOString(), "medium")}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Step name + status */}
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <p
-                            className={`text-sm font-semibold ${
-                              step.status === "COMPLETE" || step.status === "SKIPPED"
-                                ? "text-[var(--color-text-muted)]"
-                                : "text-[var(--color-text-primary)]"
-                            }`}
-                          >
-                            {step.name}
-                          </p>
-                          <span
-                            className={`badge flex-shrink-0 ${
-                              step.status === "COMPLETE"
-                                ? "badge-green"
-                                : step.status === "IN_PROGRESS"
-                                ? "badge-navy"
-                                : step.status === "PENDING_APPROVAL"
-                                ? "badge-amber"
-                                : step.status === "BLOCKED"
-                                ? "badge-red"
-                                : step.status === "OVERDUE"
-                                ? "badge-red"
-                                : "badge-gray"
-                            }`}
-                          >
-                            {step.status.replace(/_/g, " ")}
-                          </span>
-                        </div>
-
-                        {/* Owner */}
-                        {step.owner && (
-                          <p className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] mt-1">
-                            <User className="size-3" />
-                            {step.owner.name}
-                          </p>
-                        )}
-
-                        {/* Completion note */}
+                    <tr
+                      key={step.id}
+                      className="border-b border-[var(--color-border)] last:border-0 table-row-hover"
+                    >
+                      {/* Step name */}
+                      <td className="px-4 py-3">
+                        <p className="text-[10px] font-mono text-[var(--color-text-muted)] mb-0.5 tracking-wider">
+                          S{String(step.stepOrder).padStart(2, "0")}
+                        </p>
+                        <p
+                          className={`text-sm font-semibold ${
+                            isDone ? "text-[var(--color-text-muted)]" : "text-[var(--color-text-primary)]"
+                          }`}
+                        >
+                          {step.name}
+                        </p>
                         {step.status === "COMPLETE" && step.completionNote && (
-                          <p className="text-xs text-[var(--color-text-secondary)] mt-1 italic">
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-0.5 italic">
                             &ldquo;{step.completionNote}&rdquo;
                           </p>
                         )}
-
-                        {/* Blocked reason */}
                         {step.status === "BLOCKED" && step.blockedReason && (
-                          <p
-                            className="text-xs mt-1 font-medium"
-                            style={{ color: "var(--color-status-red)" }}
-                          >
-                            Blocked: {step.blockedReason}
+                          <p className="text-xs font-medium mt-0.5" style={{ color: "var(--color-status-red)" }}>
+                            ↳ {step.blockedReason}
                           </p>
                         )}
+                        {depSteps.length > 0 && !isDone && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            Awaiting: {depSteps.map((ds) => ds!.name).join(", ")}
+                          </p>
+                        )}
+                      </td>
 
-                        {/* Dependencies */}
-                        {depSteps.length > 0 &&
-                          step.status !== "COMPLETE" && (
-                            <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                              Awaiting:{" "}
-                              {depSteps
-                                .map((ds) => ds!.name)
-                                .join(", ")}
-                            </p>
-                          )}
+                      {/* Type */}
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className="text-xs text-[var(--color-text-muted)]">
+                          {stepTypeLabel(step.stepType)}
+                        </span>
+                      </td>
 
-                        {/* Approval chain */}
-                        {step.approvals.length > 0 && (
-                          <div className="mt-2 space-y-1">
-                            {step.approvals.map((approval) => {
-                              return (
-                                <div key={approval.id} className="text-xs">
-                                  <span className="text-[var(--color-text-muted)]">
-                                    Reviewers:{" "}
-                                  </span>
-                                  {approval.reviewerIds.map((rid, ridx) => {
-                                    const decision = approval.decisions.find(
-                                      (d) => d.reviewerId === rid
-                                    );
-                                    const isCurrent =
-                                      ridx === approval.currentIndex &&
-                                      approval.status === "PENDING";
-                                    return (
-                                      <span key={rid}>
-                                        <span
-                                          className={
-                                            isCurrent
-                                              ? "font-semibold text-[var(--color-navy-700)]"
-                                              : "text-[var(--color-text-muted)]"
-                                          }
-                                        >
-                                          {decision?.reviewer.name ?? `Reviewer ${ridx + 1}`}
-                                          {decision?.decision === "APPROVED" && " ✓"}
-                                          {decision?.decision === "REJECTED" && " ✗"}
-                                        </span>
-                                        {ridx < approval.reviewerIds.length - 1 && (
-                                          <span className="mx-1 text-[var(--color-text-muted)]">
-                                            →
-                                          </span>
-                                        )}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })}
+                      {/* Owner */}
+                      <td className="px-3 py-3">
+                        {step.owner ? (
+                          <span className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
+                            <User className="size-3 flex-shrink-0" />
+                            {step.owner.name}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                        )}
+                      </td>
+
+                      {/* Due date */}
+                      <td className="px-3 py-3 text-right">
+                        {step.dueDate ? (
+                          <span
+                            className={`text-xs font-numeric ${
+                              isOverdue
+                                ? "font-semibold"
+                                : "text-[var(--color-text-muted)]"
+                            }`}
+                            style={isOverdue ? { color: "var(--color-status-red)" } : undefined}
+                          >
+                            {formatDate(step.dueDate.toISOString(), "short")}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-3 py-3 text-center">
+                        <span className={`badge ${stepStatusBadgeClass(step.status)}`}>
+                          {step.status.replace(/_/g, " ")}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-3 py-3 text-right">
+                        {workflow.status !== "COMPLETED" && workflow.status !== "CANCELLED" && (
+                          <div className="flex flex-col items-end gap-1.5">
+                            <StepActionButtons
+                              stepId={step.id}
+                              workflowId={id}
+                              status={step.status}
+                              hasApprovals={step.approvals.some((a) => a.status === "PENDING")}
+                            />
+                            {pendingApproval && (
+                              <ApprovalDecisionForm
+                                workflowId={id}
+                                approvalId={pendingApproval.id}
+                              />
+                            )}
                           </div>
                         )}
-
-                        {/* Action buttons */}
-                        {workflow.status !== "COMPLETED" &&
-                          workflow.status !== "CANCELLED" && (
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                              <StepActionButtons
-                                stepId={step.id}
-                                workflowId={id}
-                                status={step.status}
-                                hasApprovals={step.approvals.some(
-                                  (a) => a.status === "PENDING"
-                                )}
-                              />
-
-                              {/* Inline approval decision form */}
-                              {pendingApproval && (
-                                <ApprovalDecisionForm
-                                  workflowId={id}
-                                  approvalId={pendingApproval.id}
-                                />
-                              )}
-                            </div>
-                          )}
-                      </div>
-                    </div>
+                      </td>
+                    </tr>
                   );
                 })}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </div>
         </div>
       )}
