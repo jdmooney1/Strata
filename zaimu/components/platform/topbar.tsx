@@ -33,12 +33,16 @@ export function Topbar({ title, notificationCount = 3 }: TopbarProps) {
 
       {/* Right: utility controls */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Search */}
+        {/* Search — shows ⌘K hint; actual palette is triggered by Cmd+K globally */}
         <button
-          className="flex items-center justify-center size-7 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-          aria-label="Search"
+          className="flex items-center gap-1.5 px-2 h-7 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+          aria-label="Search (⌘K)"
+          title="Search (⌘K)"
         >
-          <Search className="size-3.5" />
+          <Search className="size-3.5 flex-shrink-0" />
+          <span className="text-[10px] font-mono border border-[var(--color-border)] px-1 py-0.5 leading-none">
+            ⌘K
+          </span>
         </button>
 
         {/* Notification */}

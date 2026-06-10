@@ -58,7 +58,13 @@ async function AssetDetailContent({ id }: { id: string }) {
     include: {
       ownershipEntities: true,
       loans: {
-        include: { covenants: true },
+        include: {
+          covenants: {
+            include: {
+              testResults: { orderBy: { testedAt: "desc" }, take: 4 },
+            },
+          },
+        },
         orderBy: { maturityDate: "asc" },
       },
       leases: { orderBy: { leaseEnd: "asc" } },
@@ -379,10 +385,37 @@ async function AssetDetailContent({ id }: { id: string }) {
                               <th className="px-4 py-2 text-right font-semibold text-[var(--color-text-muted)]">Threshold</th>
                               <th className="px-4 py-2 text-left font-semibold text-[var(--color-text-muted)]">Next Test</th>
                               <th className="px-4 py-2 text-center font-semibold text-[var(--color-text-muted)]">Status</th>
+                              <th className="px-4 py-2 text-center font-semibold text-[var(--color-text-muted)]">Trend</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {loan.covenants.map((cov) => (
+                            {loan.covenants.map((cov) => {
+                              // Trend: compare last two test result statuses (results are ordered desc)
+                              const statusOrder: Record<string, number> = {
+                                COMPLIANT: 0,
+                                WATCH: 1,
+                                BREACH: 2,
+                                WAIVED: -1,
+                                UNKNOWN: -1,
+                              };
+                              const results = cov.testResults;
+                              let trendIndicator = "—";
+                              let trendClass = "text-[var(--color-text-muted)]";
+                              if (results.length >= 2) {
+                                const latestStatus = statusOrder[results[0].status] ?? -1;
+                                const prevStatus = statusOrder[results[1].status] ?? -1;
+                                if (latestStatus > prevStatus) {
+                                  trendIndicator = "↑";
+                                  trendClass = "text-[var(--color-status-amber)]";
+                                } else if (latestStatus < prevStatus) {
+                                  trendIndicator = "↓";
+                                  trendClass = "text-[var(--color-status-green)]";
+                                } else {
+                                  trendIndicator = "→";
+                                  trendClass = "text-[var(--color-text-muted)]";
+                                }
+                              }
+                              return (
                               <tr key={cov.id} className="border-b border-[var(--color-border)] last:border-0">
                                 <td className="px-4 py-2.5 font-medium text-[var(--color-text-primary)]">
                                   {cov.covenantType}
@@ -403,8 +436,14 @@ async function AssetDetailContent({ id }: { id: string }) {
                                     {cov.status}
                                   </span>
                                 </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  <span className={`font-mono font-semibold text-sm ${trendClass}`}>
+                                    {trendIndicator}
+                                  </span>
+                                </td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { db } from "@/lib/db";
 import { formatMillions, formatPercent, formatDate, countryFlag } from "@/lib/utils";
+import { PrintButton } from "./print-button";
 
 export const metadata: Metadata = { title: "Executive Summary" };
 export const dynamic = "force-dynamic";
@@ -102,7 +103,7 @@ async function ExecutiveSummaryContent() {
               Portfolio Operational Status — {new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}
             </p>
           </div>
-          <div className="text-right">
+          <div className="text-right flex flex-col items-end gap-2">
             <span
               className={`text-sm font-bold ${
                 criticalRisks.length > 0 || covenantBreaches > 0
@@ -118,6 +119,7 @@ async function ExecutiveSummaryContent() {
                 ? "AMBER — MONITORING REQUIRED"
                 : "GREEN — NO MATERIAL ISSUES"}
             </span>
+            <PrintButton />
           </div>
         </div>
       </div>

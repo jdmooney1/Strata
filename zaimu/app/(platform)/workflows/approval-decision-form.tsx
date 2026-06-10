@@ -24,7 +24,7 @@ export function ApprovalDecisionForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reviewerId: "demo-user",
+          reviewerId: "user_admin_001",
           decision,
           note: comment.trim() || undefined,
         }),

@@ -1062,6 +1062,7 @@ export async function evaluateAsset(
   const now = new Date();
   let eventsOpened = 0;
   let eventsResolved = 0;
+  const firedRuleCodes = new Set<string>();
 
   // 3. Evaluate each rule
   for (const rule of RISK_RULES) {
@@ -1136,6 +1137,7 @@ export async function evaluateAsset(
       if (!existing || wasResolved) {
         eventsOpened++;
       }
+      firedRuleCodes.add(rule.code);
     } else {
       // Rule does not fire → auto-resolve any existing open/acknowledged event
       if (
@@ -1234,6 +1236,9 @@ export async function evaluateAsset(
     },
   });
 
+  // 6. Auto-initiate workflows for high-priority triggers if none already active
+  await autoInitiateWorkflows(asset.id, asset.name, orgId, firedRuleCodes);
+
   return {
     assetId,
     rulesEvaluated: RISK_RULES.length,
@@ -1243,6 +1248,69 @@ export async function evaluateAsset(
     criticalCount: openCritical + openEscalated,
     warningCount: openWarnings,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-workflow initiation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Rule codes that should trigger automatic workflow creation if none is active. */
+const AUTO_WORKFLOW_MAP: Record<string, { workflowType: string; title: (assetName: string) => string }> = {
+  REFINANCING_90D: {
+    workflowType: "REFINANCING",
+    title: (n) => `Loan Refinancing — ${n}`,
+  },
+  REFINANCING_30D: {
+    workflowType: "REFINANCING",
+    title: (n) => `URGENT: Loan Refinancing — ${n}`,
+  },
+  LEASE_EXPIRY_90D: {
+    workflowType: "LEASE_RENEWAL",
+    title: (n) => `Lease Renewal — ${n}`,
+  },
+  COVENANT_BREACH: {
+    workflowType: "COVENANT_REPORTING",
+    title: (n) => `Covenant Breach Response — ${n}`,
+  },
+};
+
+async function autoInitiateWorkflows(
+  assetId: string,
+  assetName: string,
+  orgId: string,
+  firedRuleCodes: Set<string>
+): Promise<void> {
+  for (const [ruleCode, config] of Object.entries(AUTO_WORKFLOW_MAP)) {
+    if (!firedRuleCodes.has(ruleCode)) continue;
+
+    // Check if a non-cancelled workflow of this type already exists
+    const existing = await db.workflow.findFirst({
+      where: {
+        assetId,
+        workflowType: config.workflowType as never,
+        status: { notIn: ["CANCELLED", "COMPLETED"] },
+      },
+      select: { id: true },
+    });
+
+    if (existing) continue; // already managed
+
+    // Create a DRAFT workflow
+    try {
+      const { createWorkflow } = await import("@/lib/workflow-engine");
+      await createWorkflow({
+        orgId,
+        assetId,
+        workflowType: config.workflowType as never,
+        title: config.title(assetName),
+        description: `Auto-initiated by risk engine (rule: ${ruleCode})`,
+        createdById: "user_admin_001",
+      });
+    } catch (err) {
+      // Never let workflow creation break the risk engine
+      console.error("[risk-engine] auto-workflow failed", ruleCode, err);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

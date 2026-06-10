@@ -156,6 +156,54 @@ export async function main() {
 
   console.log("  + Covenants: LTV <=60% (COMPLIANT 18.7%), DSCR >=1.25x (COMPLIANT 2.41x)");
 
+  // ── Covenant Test Results — 4 quarters of history ────────────────────────────
+
+  // LTV test results (threshold <=60%, lower is better — values trending upward toward threshold)
+  const ltvTestResults = [
+    { id: "ctr_ltv_001_q1", testedAt: new Date("2025-03-31"), value: "41.20%", status: "COMPLIANT" as const },
+    { id: "ctr_ltv_001_q2", testedAt: new Date("2025-06-30"), value: "43.80%", status: "COMPLIANT" as const },
+    { id: "ctr_ltv_001_q3", testedAt: new Date("2025-09-30"), value: "47.10%", status: "COMPLIANT" as const },
+    { id: "ctr_ltv_001_q4", testedAt: new Date("2025-12-31"), value: "49.30%", status: "COMPLIANT" as const },
+  ];
+
+  for (const r of ltvTestResults) {
+    await db.covenantTestResult.upsert({
+      where: { id: r.id },
+      update: {},
+      create: {
+        id: r.id,
+        covenantId: "cov_ltv_collins_001",
+        testedAt: r.testedAt,
+        value: r.value,
+        status: r.status,
+      },
+    });
+  }
+
+  // DSCR test results (threshold >=1.25x, higher is better — values trending down toward threshold)
+  const dscrTestResults = [
+    { id: "ctr_dscr_001_q1", testedAt: new Date("2025-03-31"), value: "2.41x", status: "COMPLIANT" as const },
+    { id: "ctr_dscr_001_q2", testedAt: new Date("2025-06-30"), value: "2.18x", status: "COMPLIANT" as const },
+    { id: "ctr_dscr_001_q3", testedAt: new Date("2025-09-30"), value: "1.89x", status: "COMPLIANT" as const },
+    { id: "ctr_dscr_001_q4", testedAt: new Date("2025-12-31"), value: "1.72x", status: "COMPLIANT" as const },
+  ];
+
+  for (const r of dscrTestResults) {
+    await db.covenantTestResult.upsert({
+      where: { id: r.id },
+      update: {},
+      create: {
+        id: r.id,
+        covenantId: "cov_dscr_collins_001",
+        testedAt: r.testedAt,
+        value: r.value,
+        status: r.status,
+      },
+    });
+  }
+
+  console.log("  + Covenant test results: LTV (4 quarters, 41.2% → 49.3%), DSCR (4 quarters, 2.41x → 1.72x)");
+
   // ── Leases ──────────────────────────────────────────────────────────────────
   await db.lease.upsert({
     where: { id: "lease_nab_collins_001" },

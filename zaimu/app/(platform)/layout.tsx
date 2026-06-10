@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/platform/sidebar";
 import { Topbar } from "@/components/platform/topbar";
+import { CommandPalette } from "@/components/platform/command-palette";
 
 export default function PlatformLayout({
   children,
@@ -13,6 +14,7 @@ export default function PlatformLayout({
         <Topbar />
         <main className="content-area">{children}</main>
       </div>
+      <CommandPalette />
     </div>
   );
 }

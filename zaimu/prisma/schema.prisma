@@ -267,8 +267,22 @@ model LoanCovenant {
   notes        String?
 
   loan         Loan           @relation(fields: [loanId], references: [id])
+  testResults  CovenantTestResult[]
 
   @@map("loan_covenants")
+}
+
+model CovenantTestResult {
+  id         String         @id @default(cuid())
+  covenantId String         @map("covenant_id")
+  testedAt   DateTime       @map("tested_at")
+  value      String
+  status     CovenantStatus
+  notes      String?
+
+  covenant   LoanCovenant   @relation(fields: [covenantId], references: [id], onDelete: Cascade)
+
+  @@map("covenant_test_results")
 }
 
 model AmortisationSchedule {

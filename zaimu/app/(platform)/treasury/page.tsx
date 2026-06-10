@@ -80,6 +80,22 @@ async function TreasuryContent() {
 
   const maxMaturityAmount = Math.max(...Object.values(maturityByYear), 1);
 
+  // FX sensitivity — impact of ±5% on USD/JPY for JPY-denominated debt
+  const jpyUsdRate = latestFxRates.find(
+    (r) => r.baseCurrency === "JPY" && r.quoteCurrency === "USD"
+  ) ?? latestFxRates.find(
+    (r) => r.baseCurrency === "USD" && r.quoteCurrency === "JPY"
+  );
+  const totalJpyDebt = loans
+    .filter((l) => l.currency === "JPY")
+    .reduce((s, l) => s + Number(l.currentBalance), 0);
+  const totalUsdDebt = loans
+    .filter((l) => l.currency === "USD")
+    .reduce((s, l) => s + Number(l.currentBalance), 0);
+  const totalAudDebt = loans
+    .filter((l) => l.currency === "AUD")
+    .reduce((s, l) => s + Number(l.currentBalance), 0);
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -90,61 +106,60 @@ async function TreasuryContent() {
         </p>
       </div>
 
-      {/* Treasury KPIs */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="data-card p-4">
-          <p className="section-label">Total Loans</p>
-          <p className="text-xs text-[var(--color-text-muted)]">ローン数</p>
-          <p className="text-xl font-semibold font-numeric mt-1">
-            {loans.length}
-          </p>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            across {assets.length} assets
-          </p>
-        </div>
-        <div className="data-card p-4">
-          <p className="section-label">Total Debt</p>
-          <p className="text-xs text-[var(--color-text-muted)]">総負債</p>
-          <div className="mt-1">
-            {Object.entries(debtByCurrency).map(([cur, val]) => (
-              <p key={cur} className="text-sm font-semibold font-numeric">
-                {formatMillions(val, cur)}
-                <span className="text-xs text-[var(--color-text-muted)] ml-1">
-                  {cur}
-                </span>
-              </p>
-            ))}
-            {Object.keys(debtByCurrency).length === 0 && (
-              <p className="text-sm text-[var(--color-text-muted)]">No debt</p>
-            )}
-          </div>
-        </div>
-        <div className="data-card p-4">
-          <p className="section-label">Avg Interest Rate</p>
-          <p className="text-xs text-[var(--color-text-muted)]">平均金利</p>
-          <p className="text-xl font-semibold font-numeric mt-1">
-            {formatPercent(avgInterestRate, 2)}
-          </p>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            Blended across portfolio
-          </p>
-        </div>
-        <div className="data-card p-4">
-          <p className="section-label">FX Pairs Stored</p>
-          <p className="text-xs text-[var(--color-text-muted)]">為替ペア数</p>
-          <p className="text-xl font-semibold font-numeric mt-1">
-            {latestFxRates.length}
-          </p>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-            {breachCovenants > 0 ? (
-              <span className="text-[var(--color-status-red)] font-semibold">
-                {breachCovenants} covenant breach{breachCovenants > 1 ? "es" : ""}
-              </span>
-            ) : (
-              `${watchCovenants} watch · ${allCovenants.length} total covenants`
-            )}
-          </p>
-        </div>
+      {/* Treasury Metrics */}
+      <div className="data-card overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="border-b border-[var(--color-border)]">
+              <th className="px-4 py-2.5 text-left section-label">Facilities</th>
+              <th className="px-4 py-2.5 text-right section-label">Total Debt</th>
+              <th className="px-4 py-2.5 text-right section-label">Avg Rate</th>
+              <th className="px-4 py-2.5 text-right section-label">Covenants</th>
+              <th className="px-4 py-2.5 text-right section-label">FX Pairs</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="px-4 py-3">
+                <p className="text-sm font-semibold font-numeric">{loans.length}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">across {assets.length} assets</p>
+              </td>
+              <td className="px-4 py-3 text-right">
+                {Object.entries(debtByCurrency).map(([cur, val]) => (
+                  <p key={cur} className="text-sm font-semibold font-numeric">
+                    {formatMillions(val, cur)}{" "}
+                    <span className="text-xs text-[var(--color-text-muted)]">{cur}</span>
+                  </p>
+                ))}
+                {Object.keys(debtByCurrency).length === 0 && (
+                  <p className="text-sm text-[var(--color-text-muted)]">No debt</p>
+                )}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p className="text-sm font-semibold font-numeric">{formatPercent(avgInterestRate, 2)}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Blended</p>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p className="text-sm font-semibold font-numeric">{allCovenants.length}</p>
+                {breachCovenants > 0 ? (
+                  <p className="text-xs font-semibold mt-0.5" style={{ color: "var(--color-status-red)" }}>
+                    {breachCovenants} breach{breachCovenants > 1 ? "es" : ""}
+                  </p>
+                ) : watchCovenants > 0 ? (
+                  <p className="text-xs mt-0.5" style={{ color: "var(--color-status-amber)" }}>
+                    {watchCovenants} on watch
+                  </p>
+                ) : (
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">All compliant</p>
+                )}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <p className="text-sm font-semibold font-numeric">{latestFxRates.length}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Active pairs</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* Debt Maturity Wall */}
@@ -506,6 +521,98 @@ async function TreasuryContent() {
           </div>
         </div>
       </div>
+
+      {/* FX Sensitivity */}
+      {Object.keys(debtByCurrency).some((c) => c !== "JPY") && (
+        <div className="data-card">
+          <div className="data-card-header">
+            <div>
+              <h2 className="text-sm font-semibold">FX Sensitivity</h2>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                為替感応度 — Impact of ±5% JPY rate movement on total debt cost
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] bg-[var(--color-slate-50)]">
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-[var(--color-text-secondary)]">Currency</th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)]">Debt</th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)]">Rate (¥/1)</th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)]">JPY Equiv.</th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)] bg-[#fff8f0]">+5% (JPY weakens)</th>
+                  <th className="px-3 py-2.5 text-right text-xs font-semibold text-[var(--color-text-secondary)] bg-[#f0fff4]">−5% (JPY strengthens)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(debtByCurrency)
+                  .filter(([cur]) => cur !== "JPY")
+                  .map(([cur, debtAmt]) => {
+                    // Find JPY units per 1 unit of this currency
+                    const direct = latestFxRates.find(
+                      (r) => r.baseCurrency === cur && r.quoteCurrency === "JPY"
+                    );
+                    const inverse = latestFxRates.find(
+                      (r) => r.baseCurrency === "JPY" && r.quoteCurrency === cur
+                    );
+                    const jpyPer1 = direct
+                      ? Number(direct.rate)
+                      : inverse
+                      ? 1 / Number(inverse.rate)
+                      : null;
+
+                    const jpyValue = jpyPer1 != null ? debtAmt * jpyPer1 : null;
+                    const impact = jpyValue != null ? jpyValue * 0.05 : null;
+                    const rateDate = (direct ?? inverse)?.rateDate;
+
+                    return (
+                      <tr key={cur} className="border-b border-[var(--color-border)] last:border-0">
+                        <td className="px-4 py-2.5">
+                          <span className="text-sm font-semibold">{cur}</span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs font-numeric">
+                          {cur} {formatMillions(debtAmt)}M
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs font-numeric">
+                          {jpyPer1 != null ? (
+                            <span>
+                              {jpyPer1.toFixed(2)}
+                              {rateDate && (
+                                <span className="text-[var(--color-text-muted)] ml-1">
+                                  as at {formatDate(rateDate, "short")}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--color-text-muted)]">No rate</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs font-numeric">
+                          {jpyValue != null ? `¥${formatMillions(jpyValue)}M` : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs font-numeric bg-[#fff8f0]">
+                          {impact != null ? (
+                            <span className="font-semibold" style={{ color: "var(--color-status-amber)" }}>
+                              +¥{formatMillions(impact)}M
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs font-numeric bg-[#f0fff4]">
+                          {impact != null ? (
+                            <span className="font-semibold" style={{ color: "var(--color-status-green)" }}>
+                              −¥{formatMillions(impact)}M
+                            </span>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   FileBarChart,
   Archive,
   ClipboardList,
+  Activity,
 } from 'lucide-react';
 
 interface NavItem {
@@ -65,6 +66,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/reports',    label: 'Board Reports',   Icon: FileBarChart },
       { href: '/memory',     label: 'AI Memory',       Icon: Archive },
+      { href: '/activity',   label: 'Activity Log',    Icon: Activity },
     ],
   },
 ];
